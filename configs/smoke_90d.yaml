@@ -1,0 +1,105 @@
+# Small 90-day scenario for CI / quick test loops. Same shape, smaller scale.
+company:
+  name: Smoke
+  slug: smoke
+  currency: USD
+  industry: b2c_saas
+
+seed: 7
+
+timeline:
+  start: 2024-01-01
+  days: 90
+
+calendar:
+  holiday_country: US
+  holiday_effect: 0.85
+  annual_amp: 0.10
+  annual_peak_doy: 315
+
+weekly_shape: [1.05, 1.07, 1.05, 1.02, 0.98, 0.90, 0.88]
+
+noise:
+  day_sigma: 0.06
+  ar1: 0.3
+
+traffic:
+  duration_seconds_mean: 190
+  page_views_mean: 4.2
+  channels:
+    organic:
+      kind: organic
+      baseline: 300
+      growth: { kind: linear, rate: 0.003 }
+    paid_search:
+      kind: paid
+      spend_baseline: 300
+      spend_growth: { kind: flat }
+      cpc: 1.5
+    direct:
+      kind: fixed
+      baseline: 100
+      growth: { kind: flat }
+
+mix:
+  country: { US: 0.6, GB: 0.2, CA: 0.2 }
+  device: { desktop: 0.5, mobile: 0.4, tablet: 0.1 }
+
+funnel:
+  signup_rate:
+    organic: 0.030
+    paid_search: 0.050
+    direct: 0.060
+  signup_rate_default: 0.020
+  trial_start_rate: 0.55
+
+plans:
+  plans:
+    - { name: free, monthly_price: 0, annual_price: 0 }
+    - { name: basic, monthly_price: 15, annual_price: 150 }
+    - { name: pro, monthly_price: 49, annual_price: 490 }
+  plan_mix: { basic: 0.70, pro: 0.30 }
+  annual_share: 0.30
+
+lifecycle:
+  trial_days: 14
+  trial_convert: 0.20
+  monthly_churn: { basic: 0.05, pro: 0.03 }
+  monthly_upgrade: 0.02
+  monthly_downgrade: 0.01
+  monthly_resurrect: 0.015
+
+engagement:
+  dau_over_active: { free: 0.08, basic: 0.15, pro: 0.28 }
+  events_per_active_day: { free: 6, basic: 12, pro: 25 }
+  frailty_sigma: 0.6
+  weekend_uplift: 1.15
+  feature_mix:
+    view_dashboard: 0.35
+    create_item: 0.20
+    run_report: 0.15
+    export: 0.10
+    api_call: 0.20
+
+loading:
+  sources:
+    ad_platform: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+    web: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 5, lag_sigma: 0.5 }
+    app_db: { cadence: micro_batch, batch_minutes: 60, lag_median_minutes: 10, lag_sigma: 0.4 }
+    billing: { cadence: micro_batch, batch_minutes: 30, lag_median_minutes: 3, lag_sigma: 0.4 }
+    product: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 2, lag_sigma: 0.4 }
+
+anomalies:
+  scripted:
+    - name: paid_search_budget_cut
+      kind: rate
+      type: level_shift
+      target: spend.paid_search
+      window: { start: 2024-02-01, end: 2024-02-14 }
+      magnitude: 0.6
+    - name: product_pipeline_outage
+      kind: dq
+      type: volume_dropout
+      target: product.events
+      window: { start: 2024-03-10, end: 2024-03-11 }
+      magnitude: 0.3

@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# generated output
+/out/*.duckdb
+/out/*.duckdb.wal
+/out/export/
+*.parquet
+ground_truth.json
+run_manifest.json
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+
+# macOS
+.DS_Store

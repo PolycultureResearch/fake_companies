@@ -1,0 +1,216 @@
+# Acme — canonical B2C SaaS scenario (freemium + trial → subscription).
+# Everything here is validated 1:1 by config/schema.py:ScenarioConfig.
+company:
+  name: Acme
+  slug: acme
+  currency: USD
+  industry: b2c_saas
+
+seed: 20240101
+
+timeline:
+  start: 2024-01-01
+  days: 730 # -> 2025-12-30
+
+calendar:
+  holiday_country: US
+  holiday_effect: 0.85 # -15% on public holidays
+  annual_amp: 0.12 # +-12% sinusoidal annual cycle
+  annual_peak_doy: 315 # peaks in early November (holiday-season ramp)
+
+# Global day-of-week shape (Mon..Sun); acquisition dips on weekends.
+weekly_shape: [1.05, 1.07, 1.05, 1.02, 0.98, 0.90, 0.88]
+
+noise:
+  day_sigma: 0.06
+  ar1: 0.3
+
+traffic:
+  duration_seconds_mean: 190
+  page_views_mean: 4.2
+  channels:
+    organic:
+      kind: organic
+      baseline: 200
+      growth: { kind: logistic, capacity: 6.0, steepness: 0.006 }
+    paid_search:
+      kind: paid
+      spend_baseline: 300
+      spend_growth: { kind: exponential, rate: 0.0018 }
+      cpc: 1.5
+    paid_social:
+      kind: paid
+      spend_baseline: 180
+      spend_growth: { kind: exponential, rate: 0.0018 }
+      cpc: 1.0
+    display:
+      kind: paid
+      spend_baseline: 60
+      spend_growth: { kind: exponential, rate: 0.001 }
+      cpc: 0.6
+    direct:
+      kind: fixed
+      baseline: 80
+      growth: { kind: linear, rate: 0.002 }
+    referral:
+      kind: fixed
+      baseline: 40
+      growth: { kind: linear, rate: 0.0015 }
+    email:
+      kind: fixed
+      baseline: 20
+      growth: { kind: linear, rate: 0.003 }
+
+mix:
+  country:
+    US: 0.55
+    GB: 0.12
+    CA: 0.08
+    DE: 0.07
+    AU: 0.06
+    FR: 0.06
+    IN: 0.06
+  device:
+    desktop: 0.45
+    mobile: 0.45
+    tablet: 0.10
+
+funnel:
+  signup_rate:
+    organic: 0.030
+    paid_search: 0.050
+    paid_social: 0.035
+    display: 0.015
+    direct: 0.060
+    referral: 0.050
+    email: 0.080
+  signup_rate_default: 0.020
+  trial_start_rate: 0.55
+
+plans:
+  plans:
+    - { name: free, monthly_price: 0, annual_price: 0 }
+    - { name: basic, monthly_price: 15, annual_price: 150 }
+    - { name: pro, monthly_price: 49, annual_price: 490 }
+  plan_mix: # distribution over paid plans when a trial converts
+    basic: 0.70
+    pro: 0.30
+  annual_share: 0.30
+
+lifecycle:
+  trial_days: 14
+  trial_convert: 0.20
+  monthly_churn:
+    basic: 0.05
+    pro: 0.03
+  monthly_upgrade: 0.02
+  monthly_downgrade: 0.01
+  monthly_resurrect: 0.015
+
+engagement:
+  dau_over_active:
+    free: 0.08
+    basic: 0.15
+    pro: 0.28
+  events_per_active_day:
+    free: 6
+    basic: 12
+    pro: 25
+  frailty_sigma: 0.6
+  weekend_uplift: 1.15 # B2C usage rises on weekends
+  feature_mix:
+    view_dashboard: 0.30
+    create_item: 0.15
+    edit_item: 0.13
+    run_report: 0.12
+    export: 0.08
+    invite_teammate: 0.07
+    api_call: 0.15
+
+loading:
+  sources:
+    ad_platform: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+    web: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 5, lag_sigma: 0.5 }
+    app_db: { cadence: micro_batch, batch_minutes: 60, lag_median_minutes: 10, lag_sigma: 0.4 }
+    billing: { cadence: micro_batch, batch_minutes: 30, lag_median_minutes: 3, lag_sigma: 0.4 }
+    product: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 2, lag_sigma: 0.4 }
+
+anomalies:
+  scripted:
+    # --- rate events (cascade causally through the funnel) ---
+    - name: paid_search_budget_cut
+      kind: rate
+      type: level_shift
+      target: spend.paid_search
+      window: { start: 2024-09-02, end: 2024-09-22 }
+      magnitude: 0.6 # -40% spend for three weeks, then recovers
+
+    - name: organic_seo_slowdown
+      kind: rate
+      type: trend_change
+      target: sessions.organic
+      window: { start: 2025-01-06 }
+      magnitude: 0.9993 # compounding ~-0.07%/day slope break
+
+    - name: paid_social_signup_regression
+      kind: rate
+      type: level_shift
+      target: signup_rate.paid_social
+      window: { start: 2025-02-10, end: 2025-03-12 }
+      magnitude: 0.70 # -30% conversion, confined to US mobile
+      segment: { country: US, device: mobile }
+
+    - name: pro_churn_spike
+      kind: rate
+      type: level_shift
+      target: churn.pro
+      window: { start: 2025-06-02, end: 2025-06-30 }
+      magnitude: 1.8 # +80% churn among pro subscribers
+
+    # --- data-quality events (observation layer; business truth unchanged) ---
+    - name: product_pipeline_outage
+      kind: dq
+      type: volume_dropout
+      target: product.events
+      window: { start: 2025-04-15, end: 2025-04-16 }
+      magnitude: 0.3 # events land at 30% of normal volume
+
+    - name: sessions_userid_null_spike
+      kind: dq
+      type: null_spike
+      target: web.sessions
+      window: { start: 2025-08-05, end: 2025-08-07 }
+      magnitude: 0.25
+      params: { column: user_id }
+
+    - name: payments_currency_mix_shift
+      kind: dq
+      type: distribution_shift
+      target: billing.payments
+      window: { start: 2025-10-01, end: 2025-10-10 }
+      magnitude: 1.0
+      params:
+        column: currency
+        new_mix: { USD: 0.5, EUR: 0.5 }
+
+    - name: product_freshness_lag
+      kind: dq
+      type: loading_delay
+      target: product.events
+      window: { start: 2025-11-20, end: 2025-11-21 }
+      magnitude: 6.0 # 6x the usual connector lag
+
+    - name: payments_double_charge_dupes
+      kind: dq
+      type: duplicate_rows
+      target: billing.payments
+      window: { start: 2025-12-05, end: 2025-12-05 }
+      magnitude: 0.1 # 10% of rows duplicated
+
+  surprise:
+    count: 3
+    kinds: [rate, dq]
+    magnitude: { min: 0.5, max: 1.8 }
+    min_gap_days: 21
+    exclude_windows:
+      - { start: 2024-01-01, end: 2024-02-01 } # keep the warm-up clean
