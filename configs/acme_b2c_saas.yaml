@@ -109,13 +109,13 @@ lifecycle:
 
 engagement:
   dau_over_active:
-    free: 0.08
-    basic: 0.15
-    pro: 0.28
+    free: 0.05
+    basic: 0.13
+    pro: 0.22
   events_per_active_day:
-    free: 6
-    basic: 12
-    pro: 25
+    free: 5
+    basic: 10
+    pro: 18
   frailty_sigma: 0.6
   weekend_uplift: 1.15 # B2C usage rises on weekends
   feature_mix:

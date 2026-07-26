@@ -22,3 +22,6 @@ dbt/.user.yml
 
 # macOS
 .DS_Store
+
+# agent worktrees
+.claude/worktrees/
