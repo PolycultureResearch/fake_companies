@@ -1,0 +1,223 @@
+version: 2
+
+metrics:
+
+  # --- Marketing & traffic -------------------------------------------------
+  - name: marketing_spend
+    description: Total ad-platform spend.
+    type: simple
+    label: Marketing Spend
+    type_params:
+      measure:
+        name: marketing_spend
+        fill_nulls_with: 0
+
+  - name: sessions
+    description: Web sessions.
+    type: simple
+    label: Sessions
+    type_params:
+      measure:
+        name: sessions
+        fill_nulls_with: 0
+
+  # --- Funnel --------------------------------------------------------------
+  - name: signups
+    description: User signups.
+    type: simple
+    label: Signups
+    type_params:
+      measure:
+        name: signups
+        fill_nulls_with: 0
+
+  - name: visit_signup_rate
+    description: Signups per session (visit -> signup conversion).
+    type: ratio
+    label: Visit-to-Signup Rate
+    type_params:
+      numerator: signups
+      denominator: sessions
+
+  - name: trials_started
+    description: Trials started.
+    type: simple
+    label: Trials Started
+    type_params:
+      measure:
+        name: trials_started
+        fill_nulls_with: 0
+
+  - name: trial_conversions
+    description: Trials that converted to paid (ratio numerator).
+    type: simple
+    label: Trial Conversions
+    type_params:
+      measure:
+        name: trial_conversions
+        fill_nulls_with: 0
+
+  - name: trial_conversion_rate
+    description: Share of trials that converted to paid.
+    type: ratio
+    label: Trial Conversion Rate
+    type_params:
+      numerator: trial_conversions
+      denominator: trials_started
+
+  # --- Subscriptions & MRR -------------------------------------------------
+  - name: new_subscriptions
+    description: New paid subscriptions (trial conversions).
+    type: simple
+    label: New Subscriptions
+    type_params:
+      measure:
+        name: new_subscriptions
+        fill_nulls_with: 0
+
+  - name: churned_subscriptions
+    description: Cancelled subscriptions.
+    type: simple
+    label: Churned Subscriptions
+    type_params:
+      measure:
+        name: churned_subscriptions
+        fill_nulls_with: 0
+
+  - name: active_subscriptions
+    description: Distinct active subscriptions on each day.
+    type: simple
+    label: Active Subscriptions
+    type_params:
+      measure:
+        name: active_subscriptions
+        fill_nulls_with: 0
+
+  - name: mrr
+    description: Active monthly recurring revenue (as-of each day).
+    type: simple
+    label: MRR
+    type_params:
+      measure:
+        name: mrr
+        fill_nulls_with: 0
+
+  - name: new_mrr
+    description: New (incl. reactivation) MRR added.
+    type: simple
+    label: New MRR
+    type_params:
+      measure:
+        name: new_mrr
+        fill_nulls_with: 0
+
+  - name: expansion_mrr
+    description: MRR added from upgrades.
+    type: simple
+    label: Expansion MRR
+    type_params:
+      measure:
+        name: expansion_mrr
+        fill_nulls_with: 0
+
+  - name: contraction_mrr
+    description: MRR lost from downgrades (positive magnitude).
+    type: simple
+    label: Contraction MRR
+    type_params:
+      measure:
+        name: contraction_mrr
+        fill_nulls_with: 0
+
+  - name: churned_mrr
+    description: MRR lost from cancellations (positive magnitude).
+    type: simple
+    label: Churned MRR
+    type_params:
+      measure:
+        name: churned_mrr
+        fill_nulls_with: 0
+
+  - name: arpu
+    description: Average revenue per active subscription (MRR / active subscriptions).
+    type: derived
+    label: ARPU
+    type_params:
+      expr: mrr / nullif(active_subscriptions, 0)
+      metrics:
+        - name: mrr
+        - name: active_subscriptions
+
+  - name: customer_churn_rate
+    description: Churned subscriptions relative to active subscriptions.
+    type: ratio
+    label: Customer Churn Rate
+    type_params:
+      numerator: churned_subscriptions
+      denominator: active_subscriptions
+
+  # --- Product usage -------------------------------------------------------
+  - name: dau
+    description: Daily active users.
+    type: simple
+    label: DAU
+    type_params:
+      measure:
+        name: active_users
+        fill_nulls_with: 0
+
+  - name: wau
+    description: Weekly active users (cumulative distinct users over a trailing 7 days).
+    type: cumulative
+    label: WAU
+    type_params:
+      measure:
+        name: active_users
+        fill_nulls_with: 0
+      cumulative_type_params:
+        window: 7 days
+
+  - name: product_events
+    description: Count of product usage events.
+    type: simple
+    label: Product Events
+    type_params:
+      measure:
+        name: product_events
+        fill_nulls_with: 0
+
+  # --- Revenue / billing ---------------------------------------------------
+  - name: revenue
+    description: Succeeded payment revenue.
+    type: simple
+    label: Revenue
+    type_params:
+      measure:
+        name: revenue
+        fill_nulls_with: 0
+
+  - name: payments
+    description: Count of payment attempts.
+    type: simple
+    label: Payments
+    type_params:
+      measure:
+        name: payments
+        fill_nulls_with: 0
+
+  - name: failed_payments
+    description: Count of failed payment attempts (ratio numerator).
+    type: simple
+    label: Failed Payments
+    type_params:
+      measure:
+        name: failed_payments
+        fill_nulls_with: 0
+
+  - name: payment_failure_rate
+    description: Share of payment attempts that failed.
+    type: ratio
+    label: Payment Failure Rate
+    type_params:
+      numerator: failed_payments
+      denominator: payments

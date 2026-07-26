@@ -1,0 +1,91 @@
+version: 2
+
+sources:
+  - name: ad_platform
+    schema: ad_platform
+    tables:
+      - name: ad_spend
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: spend_id
+            tests: [not_null]
+
+  - name: web
+    schema: web
+    tables:
+      - name: sessions
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: session_id
+            tests: [not_null]
+
+  - name: app_db
+    schema: app_db
+    tables:
+      - name: users
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: user_id
+            tests: [not_null]
+      - name: plans
+        loaded_at_field: _loaded_at
+        columns:
+          - name: plan_id
+            tests: [not_null]
+      - name: subscriptions
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: subscription_id
+            tests: [not_null]
+      - name: subscription_events
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: event_id
+            tests: [not_null]
+
+  - name: billing
+    schema: billing
+    tables:
+      - name: invoices
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: invoice_id
+            tests: [not_null]
+      - name: payments
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: payment_id
+            tests: [not_null]
+
+  - name: product
+    schema: product
+    tables:
+      - name: events
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: event_id
+            tests: [not_null]

@@ -1,0 +1,338 @@
+version: 2
+
+semantic_models:
+
+  # ----------------------------------------------------------------------- #
+  # Marketing & traffic
+  # ----------------------------------------------------------------------- #
+  - name: ad_spend
+    description: Daily ad-platform spend by channel.
+    model: ref('stg_ad_spend')
+    defaults:
+      agg_time_dimension: spend_date
+    entities:
+      - name: spend
+        type: primary
+        expr: spend_id
+    dimensions:
+      - name: spend_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: channel
+        type: categorical
+    measures:
+      - name: marketing_spend
+        description: Total ad spend.
+        agg: sum
+        expr: spend
+
+  - name: sessions
+    description: Web sessions (one row per session).
+    model: ref('fct_sessions')
+    defaults:
+      agg_time_dimension: session_date
+    entities:
+      - name: session
+        type: primary
+        expr: session_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: session_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: channel
+        type: categorical
+      - name: country
+        type: categorical
+      - name: device
+        type: categorical
+    measures:
+      - name: sessions
+        description: Count of web sessions.
+        agg: sum
+        expr: 1
+
+  # ----------------------------------------------------------------------- #
+  # Acquisition funnel
+  # ----------------------------------------------------------------------- #
+  - name: signups
+    description: User signups (one row per user).
+    model: ref('fct_signups')
+    defaults:
+      agg_time_dimension: signup_date
+    entities:
+      - name: user
+        type: primary
+        expr: user_id
+    dimensions:
+      - name: signup_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: signup_channel
+        type: categorical
+      - name: country
+        type: categorical
+      - name: device
+        type: categorical
+    measures:
+      - name: signups
+        description: Count of user signups.
+        agg: sum
+        expr: 1
+
+  - name: trials
+    description: Trial-starting subscriptions with a converted flag.
+    model: ref('fct_trials')
+    defaults:
+      agg_time_dimension: trial_start_date
+    entities:
+      - name: trial
+        type: primary
+        expr: subscription_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: trial_start_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: plan
+        type: categorical
+      - name: signup_channel
+        type: categorical
+      - name: country
+        type: categorical
+      - name: device
+        type: categorical
+      - name: converted
+        type: categorical
+    measures:
+      - name: trials_started
+        description: Count of trials started.
+        agg: sum
+        expr: 1
+      - name: trial_conversions
+        description: Count of trials that converted to paid.
+        agg: sum
+        expr: "case when converted then 1 else 0 end"
+
+  # ----------------------------------------------------------------------- #
+  # Subscriptions & MRR
+  # ----------------------------------------------------------------------- #
+  - name: mrr_movements
+    description: MRR-moving subscription events (new/expansion/contraction/churned).
+    model: ref('fct_mrr_movements')
+    defaults:
+      agg_time_dimension: event_date
+    entities:
+      - name: mrr_movement
+        type: primary
+        expr: event_id
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: event_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: plan
+        type: categorical
+      - name: category
+        type: categorical
+    measures:
+      - name: new_mrr
+        description: New (incl. reactivation) MRR added.
+        agg: sum
+        expr: new_mrr_amount
+      - name: expansion_mrr
+        description: MRR added from upgrades.
+        agg: sum
+        expr: expansion_mrr_amount
+      - name: contraction_mrr
+        description: MRR lost from downgrades (positive magnitude).
+        agg: sum
+        expr: contraction_mrr_amount
+      - name: churned_mrr
+        description: MRR lost from cancellations (positive magnitude).
+        agg: sum
+        expr: churned_mrr_amount
+      - name: new_subscriptions
+        description: Count of trial conversions (new paid subscriptions).
+        agg: sum
+        expr: is_new_subscription
+      - name: churned_subscriptions
+        description: Count of cancellations.
+        agg: sum
+        expr: is_churned_subscription
+
+  - name: subscription_days
+    description: Daily active-subscription snapshot (one row per active sub per day).
+    model: ref('fct_subscription_days')
+    defaults:
+      agg_time_dimension: date_day
+    entities:
+      - name: subscription_day
+        type: primary
+        expr: subscription_day_id
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: date_day
+        type: time
+        type_params:
+          time_granularity: day
+      - name: plan
+        type: categorical
+      - name: billing_period
+        type: categorical
+    measures:
+      - name: mrr
+        description: Active monthly recurring revenue (as-of each day).
+        agg: sum
+        expr: mrr_amount
+      - name: active_subscriptions
+        description: Distinct active subscriptions on each day.
+        agg: count_distinct
+        expr: subscription_id
+
+  # ----------------------------------------------------------------------- #
+  # Billing
+  # ----------------------------------------------------------------------- #
+  - name: invoices
+    description: Invoices (one row per invoice).
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+      - name: subscription
+        type: foreign
+        expr: subscription_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: status
+        type: categorical
+    measures:
+      - name: invoices
+        description: Count of invoices.
+        agg: sum
+        expr: 1
+
+  - name: payments
+    description: Payment attempts (one row per payment).
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: payment_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: payment_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: payment_method
+        type: categorical
+      - name: status
+        type: categorical
+    measures:
+      - name: revenue
+        description: Succeeded payment amount.
+        agg: sum
+        expr: succeeded_amount
+      - name: payments
+        description: Count of payment attempts.
+        agg: sum
+        expr: 1
+      - name: failed_payments
+        description: Count of failed payment attempts.
+        agg: sum
+        expr: is_failed
+
+  # ----------------------------------------------------------------------- #
+  # Product usage
+  # ----------------------------------------------------------------------- #
+  - name: activity_days
+    description: Active user-days from product events (feeds DAU / WAU).
+    model: ref('fct_activity_days')
+    defaults:
+      agg_time_dimension: event_date
+    entities:
+      - name: user_day
+        type: primary
+        expr: user_day_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: event_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: plan
+        type: categorical
+      - name: country
+        type: categorical
+      - name: device
+        type: categorical
+    measures:
+      - name: active_users
+        description: Distinct active users.
+        agg: count_distinct
+        expr: user_id
+
+  - name: product_events
+    description: Product usage events (one row per event).
+    model: ref('stg_product_events')
+    defaults:
+      agg_time_dimension: event_date
+    entities:
+      - name: product_event
+        type: primary
+        expr: event_id
+      - name: user
+        type: foreign
+        expr: user_id
+    dimensions:
+      - name: event_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: plan
+        type: categorical
+        expr: plan_at_event
+      - name: country
+        type: categorical
+      - name: device
+        type: categorical
+    measures:
+      - name: product_events
+        description: Count of product events.
+        agg: sum
+        expr: 1

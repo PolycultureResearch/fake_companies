@@ -1,0 +1,10 @@
+fake_companies:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('FAKE_DB', '../out/acme.duckdb') }}"
+      threads: 4
+      # Raw schemas (ad_platform, web, app_db, billing, product, meta) already
+      # live inside the same DuckDB file the generator wrote. dbt materializes
+      # its own models into main / main_staging / main_marts within that file.

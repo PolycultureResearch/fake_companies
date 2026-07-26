@@ -1,0 +1,42 @@
+version: 2
+
+# Staging models are 1:1 with raw sources but deduplicated by primary key, so
+# the PK uniqueness contract is asserted here (raw sources may carry an injected
+# duplicate_rows data-quality anomaly and thus only get not_null at the source).
+models:
+  - name: stg_ad_spend
+    columns:
+      - name: spend_id
+        tests: [unique, not_null]
+  - name: stg_sessions
+    columns:
+      - name: session_id
+        tests: [unique, not_null]
+  - name: stg_users
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+  - name: stg_plans
+    columns:
+      - name: plan_id
+        tests: [unique, not_null]
+  - name: stg_subscriptions
+    columns:
+      - name: subscription_id
+        tests: [unique, not_null]
+  - name: stg_subscription_events
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+  - name: stg_invoices
+    columns:
+      - name: invoice_id
+        tests: [unique, not_null]
+  - name: stg_payments
+    columns:
+      - name: payment_id
+        tests: [unique, not_null]
+  - name: stg_product_events
+    columns:
+      - name: event_id
+        tests: [unique, not_null]

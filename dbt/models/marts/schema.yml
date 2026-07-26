@@ -1,0 +1,121 @@
+version: 2
+
+models:
+  - name: dim_users
+    description: One row per user (signup identity + acquisition attributes).
+    columns:
+      - name: user_id
+        description: Primary key.
+        tests: [unique, not_null]
+      - name: signup_channel
+        description: Acquisition channel at signup.
+      - name: country
+      - name: device_at_signup
+
+  - name: dim_plans
+    description: Subscription plans with monthly-equivalent price (annual = price/12).
+    columns:
+      - name: plan_id
+        tests: [unique, not_null]
+      - name: monthly_price
+        description: Monthly-equivalent price used across MRR calculations.
+        tests: [not_null]
+
+  - name: fct_sessions
+    description: One row per web session.
+    columns:
+      - name: session_id
+        tests: [unique, not_null]
+      - name: user_id
+        description: Nullable (anonymous sessions).
+        tests:
+          - relationships:
+              to: ref('dim_users')
+              field: user_id
+              config:
+                where: "user_id is not null"
+      - name: channel
+      - name: country
+      - name: device
+      - name: session_date
+        tests: [not_null]
+
+  - name: fct_signups
+    description: One row per user signup.
+    columns:
+      - name: user_id
+        tests: [unique, not_null]
+      - name: signup_date
+        tests: [not_null]
+
+  - name: fct_trials
+    description: One row per trial-starting subscription with a converted flag.
+    columns:
+      - name: subscription_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests:
+          - relationships:
+              to: ref('dim_users')
+              field: user_id
+      - name: converted
+        description: True when the trial produced a trial_convert event.
+        tests: [not_null]
+      - name: trial_start_date
+        tests: [not_null]
+
+  - name: fct_mrr_movements
+    description: One row per MRR-moving subscription event (new/expansion/contraction/churned).
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+      - name: category
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['new', 'expansion', 'contraction', 'churned']
+      - name: movement_amount
+        tests: [not_null]
+
+  - name: fct_subscription_days
+    description: Daily active-subscription snapshot (one row per active subscription per day).
+    columns:
+      - name: subscription_day_id
+        tests: [unique, not_null]
+      - name: date_day
+        tests: [not_null]
+      - name: subscription_id
+        tests: [not_null]
+      - name: mrr_amount
+        description: Monthly-equivalent MRR contributed by this subscription that day.
+        tests: [not_null]
+
+  - name: fct_invoices
+    description: One row per invoice.
+    columns:
+      - name: invoice_id
+        tests: [unique, not_null]
+      - name: issued_date
+        tests: [not_null]
+
+  - name: fct_payments
+    description: One row per payment attempt.
+    columns:
+      - name: payment_id
+        tests: [unique, not_null]
+      - name: payment_date
+        tests: [not_null]
+      - name: status
+        tests:
+          - accepted_values:
+              values: ['succeeded', 'failed']
+
+  - name: fct_activity_days
+    description: One row per active user per day (product usage).
+    columns:
+      - name: user_day_id
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [not_null]
+      - name: event_date
+        tests: [not_null]
