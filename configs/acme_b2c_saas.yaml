@@ -175,13 +175,13 @@ anomalies:
       window: { start: 2025-04-15, end: 2025-04-16 }
       magnitude: 0.3 # events land at 30% of normal volume
 
-    - name: sessions_userid_null_spike
+    - name: sessions_country_null_spike
       kind: dq
       type: null_spike
       target: web.sessions
       window: { start: 2025-08-05, end: 2025-08-07 }
       magnitude: 0.25
-      params: { column: user_id }
+      params: { column: country } # normally-populated column drops to ~25% null
 
     - name: payments_currency_mix_shift
       kind: dq

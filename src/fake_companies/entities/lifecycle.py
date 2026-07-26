@@ -229,16 +229,19 @@ class _EventBuffer:
         self.sec: list[np.ndarray] = []
 
     def add(self, user, spell, etype, frm, to, day, sec):
+        # np.array (not asarray) forces a copy: callers pass live state arrays
+        # (e.g. spell_no) that mutate later — a reference here would corrupt
+        # already-recorded events.
         k = len(user)
-        self.user.append(np.asarray(user, dtype=np.int64))
-        self.spell.append(np.asarray(spell, dtype=np.int64))
+        self.user.append(np.array(user, dtype=np.int64))
+        self.spell.append(np.array(spell, dtype=np.int64))
         self.etype.append(np.full(k, etype, dtype=object))
         self.frm.append(np.full(k, frm, dtype=np.int64) if np.isscalar(frm)
-                        else np.asarray(frm, dtype=np.int64))
+                        else np.array(frm, dtype=np.int64))
         self.to.append(np.full(k, to, dtype=np.int64) if np.isscalar(to)
-                       else np.asarray(to, dtype=np.int64))
-        self.day.append(np.asarray(day, dtype=np.int64))
-        self.sec.append(np.asarray(sec, dtype=np.int64))
+                       else np.array(to, dtype=np.int64))
+        self.day.append(np.array(day, dtype=np.int64))
+        self.sec.append(np.array(sec, dtype=np.int64))
 
     def add_one(self, user, spell, etype, frm, to, day, sec):
         self.add(np.array([user]), np.array([spell]), etype, frm, to,

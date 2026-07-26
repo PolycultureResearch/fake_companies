@@ -47,6 +47,9 @@ def test_spell_and_event_integrity(smoke_run):
     assert active["canceled_at"].isna().all()
     # active/started spells reference a real paid plan
     assert active["plan_id"].notna().all()
+    # no empty spells: every spell has a trial_start or a paid start (catches
+    # event-aliasing bugs that split a trial spell across subscription ids)
+    assert (subs["trial_start_at"].notna() | subs["started_at"].notna()).all()
 
 
 def test_status_values_valid(smoke_run):
@@ -57,7 +60,6 @@ def test_status_values_valid(smoke_run):
 
 def test_trial_conversion_matches_config(smoke_run):
     cfg, r = smoke_run
-    subs = r.frames["app_db.subscriptions"]
     ev = r.frames["app_db.subscription_events"]
     n_trials = int((ev["event_type"] == "trial_start").sum())
     n_conv = int((ev["event_type"] == "trial_convert").sum())
