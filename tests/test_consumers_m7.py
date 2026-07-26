@@ -30,22 +30,42 @@ def test_consumer_contracts(tmp_path):
     base_env = {**os.environ, "PYTHONPATH": "src"}
 
     gen = subprocess.run(
-        [sys.executable, "-m", "fake_companies.cli", "generate",
-         "--config", "configs/smoke_90d.yaml", "--out", str(db)],
-        cwd=ROOT, env=base_env, capture_output=True, text=True, check=False,
+        [
+            sys.executable,
+            "-m",
+            "fake_companies.cli",
+            "generate",
+            "--config",
+            "configs/smoke_90d.yaml",
+            "--out",
+            str(db),
+        ],
+        cwd=ROOT,
+        env=base_env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert gen.returncode == 0, gen.stderr
 
     env = {**os.environ, "DBT_PROFILES_DIR": str(ROOT / "dbt"), "FAKE_DB": str(db)}
     build = subprocess.run(
         [str(DBT), "build", "--project-dir", "dbt"],
-        cwd=ROOT, env=env, capture_output=True, text=True, check=False,
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert build.returncode == 0, build.stdout[-3000:] + build.stderr[-2000:]
 
     verify = subprocess.run(
         [sys.executable, "scripts/verify_consumers.py"],
-        cwd=ROOT, env=env, capture_output=True, text=True, check=False,
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert verify.returncode == 0, verify.stdout + verify.stderr
     assert "ALL CONSUMER CONTRACTS OK" in verify.stdout

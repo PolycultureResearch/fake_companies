@@ -16,16 +16,54 @@ anomalies carry **ground truth** so you can score detectors.
 ```bash
 uv sync
 uv run fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb
-uv run fake-companies truth --db out/acme.duckdb        # list injected anomalies
+uv run fake-companies truth  --db out/acme.duckdb        # list injected anomalies
 uv run fake-companies export --db out/acme.duckdb --format parquet
 ```
 
-Then model with the companion dbt project and query metrics via MetricFlow:
+Model the raw tables with the companion dbt project and query metrics via
+MetricFlow (this is Breakdown's exact fetch path):
 
 ```bash
-cd dbt && FAKE_DB=../out/acme.duckdb dbt build
-mf query --metrics mrr --group-by metric_time__day --csv /tmp/mrr.csv
+uv sync --extra dbt
+export DBT_PROFILES_DIR=$PWD/dbt FAKE_DB=$PWD/out/acme.duckdb
+uv run dbt build --project-dir dbt
+cd dbt && uv run mf validate-configs
+uv run mf query --metrics mrr --group-by metric_time__day --csv /tmp/mrr.csv
 ```
+
+Verify both consumer contracts (Breakdown tree metrics + Tremor dataflow tables)
+end-to-end:
+
+```bash
+FAKE_DB=out/acme.duckdb uv run python scripts/verify_consumers.py
+```
+
+### Blind-testing a detector
+
+Injected anomalies (scripted + `surprise`-sampled) are recorded in
+`ground_truth.json`. Don't open it, run your detector, then score:
+
+```bash
+uv run fake-companies score --truth ground_truth.json --events my_detector_events.json --tolerance 3
+# -> precision / recall / f1 with +-k day bucket tolerance
+```
+
+## What you get
+
+The default `acme_b2c_saas.yaml` scenario (2 years, seed-deterministic) produces
+roughly:
+
+| table | rows | notes |
+|-------|------|-------|
+| `web.sessions` | ~1.3M | event_time + nullable user_id; PSI/volume targets |
+| `product.events` | ~7.5M | NHPP usage, diurnal + weekend shape (Tremor dataflow star) |
+| `app_db.users` | ~50k | faker attributes |
+| `app_db.subscriptions` | ~31k spells | ~8.8k ever-paid; MRR movements telescope exactly |
+| `billing.payments` | ~— | dunning, ~5% failures (PSI on currency, quantiles on amount) |
+| `meta.ground_truth` | 12+ | every injected rate/dq anomaly, with expected affected signals |
+
+21 MetricFlow metrics (`marketing_spend`, `mrr`, `visit_signup_rate`, `dau`,
+`wau`, `payment_failure_rate`, …) queryable at daily grain. Full run ≈ 20s.
 
 ## Architecture
 

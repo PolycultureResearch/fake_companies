@@ -42,19 +42,32 @@ def verify_breakdown(start: str, end: str) -> list[tuple[str, bool, str]]:
     for m in metrics:
         with tempfile.NamedTemporaryFile(suffix=".csv") as tmp:
             proc = subprocess.run(
-                [mf, "query", "--metrics", m, "--group-by", "metric_time__day",
-                 "--start-time", start, "--end-time", end, "--csv", tmp.name],
-                cwd=DBT_DIR, env=env, capture_output=True, text=True, timeout=120,
+                [
+                    mf,
+                    "query",
+                    "--metrics",
+                    m,
+                    "--group-by",
+                    "metric_time__day",
+                    "--start-time",
+                    start,
+                    "--end-time",
+                    end,
+                    "--csv",
+                    tmp.name,
+                ],
+                cwd=DBT_DIR,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
                 check=False,
             )
             header = Path(tmp.name).read_text().splitlines()[:1]
             hdr = header[0] if header else ""
             rows = max(0, len(Path(tmp.name).read_text().splitlines()) - 1)
             ok = (
-                proc.returncode == 0
-                and "metric_time__day" in hdr.lower()
-                and m in hdr
-                and rows > 0
+                proc.returncode == 0 and "metric_time__day" in hdr.lower() and m in hdr and rows > 0
             )
             results.append((f"breakdown:{m}", ok, f"{rows} rows"))
     return results
@@ -81,8 +94,13 @@ def verify_tremor() -> list[tuple[str, bool, str]]:
                 if sig.get("column"):
                     required.add(sig["column"])
             missing = required - cols
-            results.append((f"tremor:{rel}", not missing,
-                            "ok" if not missing else f"missing {sorted(missing)}"))
+            results.append(
+                (
+                    f"tremor:{rel}",
+                    not missing,
+                    "ok" if not missing else f"missing {sorted(missing)}",
+                )
+            )
     finally:
         con.close()
     return results
