@@ -45,18 +45,23 @@ def generate(cfg: ScenarioConfig, seed: int | None = None) -> GenerationResult:
     frames: dict[str, pd.DataFrame] = {}
     ground_truth: list[GroundTruthRecord] = []
 
+    # Resolve scripted + surprise anomalies once (stable rate/dq split).
+    from .anomalies import resolve_anomalies
+
+    resolved = resolve_anomalies(cfg, cal, rng)
+
     # --- Layer 1: latent driver panel + rate anomalies (M1) ----------------- #
     from .latent import apply_rate_events, build_drivers
 
     panel = build_drivers(cfg, cal, rng)
-    panel, rate_gt = apply_rate_events(panel, cfg, cal, rng)
+    panel, rate_gt = apply_rate_events(panel, resolved, cfg, cal)
     ground_truth.extend(rate_gt)
 
     # --- Layer 2: entity-level simulation (M2-M4) --------------------------- #
     _build_entities(cfg, cal, rng, panel, frames)
 
     # --- Layer 3: observation-layer corruption + loading (M4) --------------- #
-    dq_gt = _corrupt(cfg, cal, rng, frames)
+    dq_gt = _corrupt(cfg, cal, rng, frames, resolved)
     ground_truth.extend(dq_gt)
 
     manifest = build_manifest(cfg, seed, len(ground_truth))
@@ -77,11 +82,11 @@ def _build_entities(cfg, cal, rng, panel, frames) -> None:
     entities.build_all(cfg, cal, rng, panel, frames)
 
 
-def _corrupt(cfg, cal, rng, frames) -> list[GroundTruthRecord]:
+def _corrupt(cfg, cal, rng, frames, resolved) -> list[GroundTruthRecord]:
     """Apply loading model + DQ corruption. Filled in M4."""
     from .corruption import apply_loading_and_dq
 
-    return apply_loading_and_dq(cfg, cal, rng, frames)
+    return apply_loading_and_dq(cfg, cal, rng, frames, resolved)
 
 
 def write_generation(

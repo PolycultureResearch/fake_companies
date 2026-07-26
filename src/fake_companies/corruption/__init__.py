@@ -22,6 +22,7 @@ def apply_loading_and_dq(
     cal: Calendar,
     rng: RngHub,
     frames: dict[str, pd.DataFrame],
+    resolved: list,
 ) -> list[GroundTruthRecord]:
     """Stub: no loading model or corruption yet. Populated in M4."""
     return []

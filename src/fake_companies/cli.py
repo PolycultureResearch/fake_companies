@@ -97,12 +97,15 @@ def score(
 def _dump_drivers(cfg, seed, path: Path) -> None:
     import pandas as pd
 
+    from .anomalies import resolve_anomalies
     from .core import RngHub, build_calendar
-    from .latent import build_drivers
+    from .latent import apply_rate_events, build_drivers
 
     cal = build_calendar(cfg)
     rng = RngHub(cfg.seed if seed is None else seed)
+    resolved = resolve_anomalies(cfg, cal, rng)
     panel = build_drivers(cfg, cal, rng)
+    panel, _ = apply_rate_events(panel, resolved, cfg, cal)
     df = pd.DataFrame({"date": cal.dates})
     for key, arr in sorted(panel.rates.items()):
         df[key] = arr
