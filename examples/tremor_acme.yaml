@@ -1,0 +1,90 @@
+# Tremor monitor config for the Acme scenario.
+#
+# Tremor is early-stage/volatile, so this stays example-level and builds only on
+# the stable contract: (a) daily MetricFlow KPIs and (b) raw warehouse tables
+# with event-time + `_loaded_at` columns. KPI monitors profile the semantic
+# layer (Breakdown's fetch path); dataflow monitors profile raw tables directly.
+#
+# Point connections at a generated database:
+#   fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb
+#   cd dbt && FAKE_DB=../out/acme.duckdb dbt build   # materialize marts + semantic
+connections:
+  warehouse:
+    dialect: duckdb
+    dsn: "${FAKE_DB:-out/acme.duckdb}"
+  metricflow:
+    mode: cli
+    project_dir: "./dbt"
+
+schedule:
+  cron: "0 6 * * *"
+
+defaults:
+  dataflow:
+    grain: hour
+    training_window_days: 30
+    max_lateness: "90m"
+    threshold_sigma: 3.5
+    min_effect_pct: 5.0
+    cooldown_hours: 6
+    detectors: [robust_z, changepoint]
+  kpi:
+    grain: day
+    training_window_days: 90
+    max_lateness: "1d"
+    seasonality: weekly
+    target_risk: 1.0e-4
+    threshold_sigma: 3.0
+    min_effect_pct: 5.0
+    min_effect_abs: 0.02
+    cooldown_hours: 24
+    detectors: auto
+
+monitors:
+  # --- KPI monitors (daily MetricFlow series) --------------------------------
+  - mode: kpi
+    metric: signups
+    source: metricflow
+  - mode: kpi
+    metric: mrr
+    source: metricflow
+  - mode: kpi
+    metric: visit_signup_rate
+    source: metricflow
+    min_effect_abs: 0.005
+
+  # --- Dataflow monitors (raw tables; event_time + _loaded_at) ---------------
+  - mode: dataflow
+    name: product.events
+    connection: warehouse
+    relation: product.events
+    event_time_column: occurred_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "2h"
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [event_id]
+    signals:
+      - { type: volume } # catches product_pipeline_outage (volume_dropout)
+      - { type: null_rate, columns: [user_id] }
+      - { type: distribution, column: event_name, method: psi }
+
+  - mode: dataflow
+    name: billing.payments
+    connection: warehouse
+    relation: billing.payments
+    event_time_column: created_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "2h"
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [payment_id]
+    signals:
+      - { type: volume }
+      - { type: null_rate, columns: [failure_code] }
+      - { type: distribution, column: currency, method: psi } # currency_mix_shift
+      - { type: numeric_distribution, column: amount, method: quantiles }

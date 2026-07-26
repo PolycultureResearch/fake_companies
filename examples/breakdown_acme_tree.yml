@@ -1,0 +1,76 @@
+# Breakdown metric tree for the Acme scenario.
+#
+# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
+#   mf query --metrics <name> --group-by metric_time__day --csv
+# run inside the dbt project (`provider.project_path`). The tree encodes the
+# acquisition -> activation -> revenue funnel so Breakdown's Bayesian RCA can
+# attribute an MRR movement back to its upstream driver (e.g. a paid-search
+# budget cut cascading to sessions -> signups -> trials -> new MRR).
+provider:
+  type: local
+  project_path: "../dbt" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+
+metrics:
+  - name: marketing_spend
+    description: Paid acquisition spend across channels.
+    seasonality:
+      - { period: 7, name: weekly }
+      - { period: 365, name: annual }
+
+  - name: sessions
+    description: Web sessions (paid channels scale with spend).
+    parents: [marketing_spend]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 2.0, sigma: 0.5 } # ~sessions per $ of spend
+    seasonality:
+      - { period: 7, name: weekly }
+
+  - name: signups
+    description: New user signups.
+    parents: [sessions]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.04, sigma: 0.01 } # visit -> signup rate
+
+  - name: trials_started
+    description: Trials started from signups.
+    parents: [signups]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.55, sigma: 0.05 }
+
+  - name: new_subscriptions
+    description: Trials converting to paid.
+    parents: [trials_started]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.20, sigma: 0.03 }
+
+  - name: new_mrr
+    description: MRR added by new subscriptions.
+    parents: [new_subscriptions]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 25.0, sigma: 5.0 } # ~ARPU of a converting plan
+
+  # Revenue identity: MRR = ARPU x active subscriptions (deterministic node).
+  - name: arpu
+    description: Average revenue per active subscription.
+    seasonality:
+      - { period: 30, name: monthly }
+
+  - name: active_subscriptions
+    description: Count of active paid subscriptions.
+    seasonality:
+      - { period: 7, name: weekly }
+
+  - name: mrr
+    description: Monthly recurring revenue (ARPU x active subscriptions).
+    parents: [arpu, active_subscriptions]
+    formula: "arpu * active_subscriptions"
