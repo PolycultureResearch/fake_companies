@@ -50,42 +50,49 @@ def build_usage(
     frailty = _frailty(gen, n_users, cfg.engagement.frailty_sigma)
 
     # --- assemble plan segments -------------------------------------------- #
+    # Plans that generate events = the engagement config's plan keys; the free /
+    # zero-price tier is the pre-conversion baseline. Both derived from config.
+    plan_names = list(cfg.engagement.dau_over_active)
+    free_name = plan_index.free_name
+    paid_names = [p for p in plan_names if p != free_name]
+
     subs = frames.get("app_db.subscriptions")
-    seg_user: dict[str, list] = {"free": [], "basic": [], "pro": []}
-    seg_start: dict[str, list] = {"free": [], "basic": [], "pro": []}
-    seg_end: dict[str, list] = {"free": [], "basic": [], "pro": []}
+    seg_user: dict[str, list] = {p: [] for p in plan_names}
+    seg_start: dict[str, list] = {p: [] for p in plan_names}
+    seg_end: dict[str, list] = {p: [] for p in plan_names}
 
     first_paid = np.full(n_users, n_days, dtype=np.int64)
     if subs is not None and len(subs):
-        paid = subs[subs["started_at"].notna()]
-        p_uid = paid["user_id"].to_numpy(dtype=np.int64)
-        p_start = _to_day(paid["started_at"], cal, n_days)
-        p_end = np.where(
-            paid["canceled_at"].notna().to_numpy(),
-            _to_day(paid["canceled_at"], cal, n_days),
-            n_days,
-        )
-        p_plan = np.array(
-            [plan_index.row(int(p)).name for p in paid["plan_id"].fillna(0).to_numpy()],
-            dtype=object,
-        )
-        # earliest paid start per user -> end of the free pre-conversion segment
-        np.minimum.at(first_paid, p_uid - 1, p_start)
-        for plan in ("basic", "pro"):
-            m = p_plan == plan
-            seg_user[plan].append(p_uid[m] - 1)
-            seg_start[plan].append(p_start[m])
-            seg_end[plan].append(p_end[m])
+        paid = subs[subs["started_at"].notna() & subs["plan_id"].notna()]
+        if len(paid):
+            p_uid = paid["user_id"].to_numpy(dtype=np.int64)
+            p_start = _to_day(paid["started_at"], cal, n_days)
+            p_end = np.where(
+                paid["canceled_at"].notna().to_numpy(),
+                _to_day(paid["canceled_at"], cal, n_days),
+                n_days,
+            )
+            p_plan = np.array(
+                [plan_index.row(int(p)).name for p in paid["plan_id"].to_numpy()], dtype=object
+            )
+            # earliest paid start per user -> end of the free pre-conversion segment
+            np.minimum.at(first_paid, p_uid - 1, p_start)
+            for plan in paid_names:
+                m = p_plan == plan
+                seg_user[plan].append(p_uid[m] - 1)
+                seg_start[plan].append(p_start[m])
+                seg_end[plan].append(p_end[m])
 
-    # free segment for every user: [created_day, first_paid_start)
-    free_end = np.minimum(first_paid, n_days)
-    seg_user["free"].append(uid0)
-    seg_start["free"].append(created_day[uid0])
-    seg_end["free"].append(free_end[uid0])
+    # free/baseline segment for every user: [created_day, first_paid_start)
+    if free_name is not None:
+        free_end = np.minimum(first_paid, n_days)
+        seg_user[free_name].append(uid0)
+        seg_start[free_name].append(created_day[uid0])
+        seg_end[free_name].append(free_end[uid0])
 
     # --- generate events per plan group ------------------------------------ #
     parts: list[pd.DataFrame] = []
-    for plan in ("free", "basic", "pro"):
+    for plan in plan_names:
         if not seg_user[plan]:
             continue
         su = np.concatenate(seg_user[plan]).astype(np.int64)

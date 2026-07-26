@@ -192,37 +192,29 @@ def _apply_hazards(
         )
         st[ch_idx] = _CHURNED
 
-    # non-churned: upgrade (basic->pro) / downgrade (pro->basic)
+    # non-churned: move one step along the paid-plan ladder (derived from config,
+    # ordered by price). Upgrade -> next tier up; downgrade -> next tier down.
     survive = idx[~churn]
     if len(survive) == 0:
         return
-    s_names = np.array([plan_index.row(int(p)).name for p in plan_id[survive]], dtype=object)
-    u2 = gen.random(len(survive))
+    ladder = plan_index.paid_ladder
+    if len(ladder) < 2:
+        return  # single paid tier: nowhere to move
+    tier_of = {n: i for i, n in enumerate(ladder)}
+    tier = np.array([tier_of.get(plan_index.row(int(p)).name, 0) for p in plan_id[survive]])
+    can_up = tier < len(ladder) - 1
+    can_down = tier > 0
     up_p = panel.get("upgrade")[dm]
     down_p = panel.get("downgrade")[dm]
+    upgrade = can_up & (gen.random(len(survive)) < up_p)
+    downgrade = can_down & ~upgrade & (gen.random(len(survive)) < down_p)
 
-    is_basic = s_names == "basic"
-    is_pro = s_names == "pro"
-    upgrade = is_basic & (u2 < up_p)
-    downgrade = is_pro & (u2 < down_p)
-
-    up_idx = survive[upgrade]
-    if len(up_idx):
-        for j in up_idx:
+    for direction, mask, step in (("upgrade", upgrade, 1), ("downgrade", downgrade, -1)):
+        for k in np.flatnonzero(mask):
+            j = survive[k]
             period = plan_index.row(int(plan_id[j])).billing_period
-            to = plan_index.id_for("pro", period)
-            ev.add_one(
-                uid[j], spell_no[j], "upgrade", int(plan_id[j]), to, *_one_day(gen, m, n_days)
-            )
-            plan_id[j] = to
-    dn_idx = survive[downgrade]
-    if len(dn_idx):
-        for j in dn_idx:
-            period = plan_index.row(int(plan_id[j])).billing_period
-            to = plan_index.id_for("basic", period)
-            ev.add_one(
-                uid[j], spell_no[j], "downgrade", int(plan_id[j]), to, *_one_day(gen, m, n_days)
-            )
+            to = plan_index.id_for(ladder[tier[k] + step], period)
+            ev.add_one(uid[j], spell_no[j], direction, int(plan_id[j]), to, *_one_day(gen, m, n_days))
             plan_id[j] = to
 
 
@@ -232,13 +224,9 @@ def _sample_plan(gen, plan_index: PlanIndex, names, probs, annual_share, size) -
     out = np.empty(size, dtype=np.int64)
     for i in range(size):
         nm = names[name_idx[i]]
-        period = "annual" if annual[i] and _has_annual(plan_index, nm) else "monthly"
+        period = "annual" if annual[i] and plan_index.has_period(nm, "annual") else "monthly"
         out[i] = plan_index.id_for(nm, period)
     return out
-
-
-def _has_annual(plan_index: PlanIndex, name: str) -> bool:
-    return (name, "annual") in plan_index._by_key
 
 
 def _month_day(gen, m, n_days, size) -> np.ndarray:

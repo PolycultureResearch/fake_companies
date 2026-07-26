@@ -11,6 +11,10 @@ rows (sessions, signups, subscriptions, billing, product events), then an
 observation layer models connector loading lag and data-quality faults. Injected
 anomalies carry **ground truth** so you can score detectors.
 
+**Using it to build a dataset?** See [`docs/using.md`](docs/using.md) for a
+recipe cookbook (inject an MRR drop, a pipeline outage, a segmented regression,
+a blind test). AI agents: invoke the **`simulate-company`** skill.
+
 ## Quickstart
 
 ```bash
