@@ -14,6 +14,8 @@ anomalies carry **ground truth** so you can score detectors.
 **Using it to build a dataset?** See [`docs/using.md`](docs/using.md) for a
 recipe cookbook (inject an MRR drop, a pipeline outage, a segmented regression,
 a blind test). AI agents: invoke the **`simulate-company`** skill.
+Future work (other verticals, MCP server, config'able constants) is in
+[`docs/roadmap.md`](docs/roadmap.md).
 
 ## Quickstart
 
