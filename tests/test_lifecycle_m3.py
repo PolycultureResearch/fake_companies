@@ -24,7 +24,9 @@ def test_mrr_movements_telescope(smoke_run):
     idx = build_plan_index(cfg)
     ev = r.frames["app_db.subscription_events"]
     subs = r.frames["app_db.subscriptions"]
-    movement = sum(_mrr(idx, t) - _mrr(idx, f) for f, t in zip(ev["from_plan_id"], ev["to_plan_id"]))
+    movement = sum(
+        _mrr(idx, t) - _mrr(idx, f) for f, t in zip(ev["from_plan_id"], ev["to_plan_id"])
+    )
     final_mrr = sum(
         idx.monthly_price(int(p)) for p in subs.loc[subs.status == "active", "plan_id"].dropna()
     )
@@ -90,7 +92,7 @@ def test_churn_hazard_matches_config():
     n_months = int(np.ceil(cfg.timeline.n_days / 30))
 
     converted = subs[subs["started_at"].notna()].copy()
-    start_month = ((pd.to_datetime(converted["started_at"]) - pd.Timestamp(start)).dt.days // 30)
+    start_month = (pd.to_datetime(converted["started_at"]) - pd.Timestamp(start)).dt.days // 30
     canceled = converted["status"] == "canceled"
     end_month = np.where(
         canceled,

@@ -98,22 +98,44 @@ def build_lifecycle(
                 st[conv_idx] = _ACTIVE
                 started_month[conv_idx] = m
                 ev.add(
-                    uid[conv_idx], spell_no[conv_idx], "trial_convert",
-                    0, pid, trial_end_day[conv_idx], gen.integers(0, 86400, size=len(conv_idx)),
+                    uid[conv_idx],
+                    spell_no[conv_idx],
+                    "trial_convert",
+                    0,
+                    pid,
+                    trial_end_day[conv_idx],
+                    gen.integers(0, 86400, size=len(conv_idx)),
                 )
             if len(exp_idx):
                 st[exp_idx] = _EXPIRED
                 ev.add(
-                    uid[exp_idx], spell_no[exp_idx], "trial_expire",
-                    0, 0, trial_end_day[exp_idx], gen.integers(0, 86400, size=len(exp_idx)),
+                    uid[exp_idx],
+                    spell_no[exp_idx],
+                    "trial_expire",
+                    0,
+                    0,
+                    trial_end_day[exp_idx],
+                    gen.integers(0, 86400, size=len(exp_idx)),
                 )
 
         # --- B) monthly hazards on subs active before this month ------------ #
         active = (st == _ACTIVE) & (started_month < m)
         if active.any():
             _apply_hazards(
-                gen, cfg, panel, plan_index, churn_names, active, st, plan_id,
-                m, dm, n_days, uid, spell_no, ev,
+                gen,
+                cfg,
+                panel,
+                plan_index,
+                churn_names,
+                active,
+                st,
+                plan_id,
+                m,
+                dm,
+                n_days,
+                uid,
+                spell_no,
+                ev,
             )
 
         # --- C) resurrection of churned/expired users ----------------------- #
@@ -130,18 +152,24 @@ def build_lifecycle(
                 st[res_idx] = _ACTIVE
                 started_month[res_idx] = m
                 day = _month_day(gen, m, n_days, len(res_idx))
-                ev.add(uid[res_idx], spell_no[res_idx], "resurrect", 0, pid, day,
-                       gen.integers(0, 86400, size=len(res_idx)))
+                ev.add(
+                    uid[res_idx],
+                    spell_no[res_idx],
+                    "resurrect",
+                    0,
+                    pid,
+                    day,
+                    gen.integers(0, 86400, size=len(res_idx)),
+                )
 
     events_df = ev.frame(cal)
     frames["app_db.subscription_events"] = _finalize_events(events_df, plan_index)
-    frames["app_db.subscriptions"] = _derive_subscriptions(
-        events_df, plan_index, cfg, cal
-    )
+    frames["app_db.subscriptions"] = _derive_subscriptions(events_df, plan_index, cfg, cal)
 
 
-def _apply_hazards(gen, cfg, panel, plan_index, churn_names, active, st, plan_id,
-                   m, dm, n_days, uid, spell_no, ev):
+def _apply_hazards(
+    gen, cfg, panel, plan_index, churn_names, active, st, plan_id, m, dm, n_days, uid, spell_no, ev
+):
     idx = np.flatnonzero(active)
     names = np.array([plan_index.row(int(p)).name for p in plan_id[idx]], dtype=object)
 
@@ -153,8 +181,15 @@ def _apply_hazards(gen, cfg, panel, plan_index, churn_names, active, st, plan_id
     ch_idx = idx[churn]
     if len(ch_idx):
         day = _month_day(gen, m, n_days, len(ch_idx))
-        ev.add(uid[ch_idx], spell_no[ch_idx], "cancel", plan_id[ch_idx], 0, day,
-               gen.integers(0, 86400, size=len(ch_idx)))
+        ev.add(
+            uid[ch_idx],
+            spell_no[ch_idx],
+            "cancel",
+            plan_id[ch_idx],
+            0,
+            day,
+            gen.integers(0, 86400, size=len(ch_idx)),
+        )
         st[ch_idx] = _CHURNED
 
     # non-churned: upgrade (basic->pro) / downgrade (pro->basic)
@@ -176,16 +211,18 @@ def _apply_hazards(gen, cfg, panel, plan_index, churn_names, active, st, plan_id
         for j in up_idx:
             period = plan_index.row(int(plan_id[j])).billing_period
             to = plan_index.id_for("pro", period)
-            ev.add_one(uid[j], spell_no[j], "upgrade", int(plan_id[j]), to,
-                       *_one_day(gen, m, n_days))
+            ev.add_one(
+                uid[j], spell_no[j], "upgrade", int(plan_id[j]), to, *_one_day(gen, m, n_days)
+            )
             plan_id[j] = to
     dn_idx = survive[downgrade]
     if len(dn_idx):
         for j in dn_idx:
             period = plan_index.row(int(plan_id[j])).billing_period
             to = plan_index.id_for("basic", period)
-            ev.add_one(uid[j], spell_no[j], "downgrade", int(plan_id[j]), to,
-                       *_one_day(gen, m, n_days))
+            ev.add_one(
+                uid[j], spell_no[j], "downgrade", int(plan_id[j]), to, *_one_day(gen, m, n_days)
+            )
             plan_id[j] = to
 
 
@@ -236,36 +273,50 @@ class _EventBuffer:
         self.user.append(np.array(user, dtype=np.int64))
         self.spell.append(np.array(spell, dtype=np.int64))
         self.etype.append(np.full(k, etype, dtype=object))
-        self.frm.append(np.full(k, frm, dtype=np.int64) if np.isscalar(frm)
-                        else np.array(frm, dtype=np.int64))
-        self.to.append(np.full(k, to, dtype=np.int64) if np.isscalar(to)
-                       else np.array(to, dtype=np.int64))
+        self.frm.append(
+            np.full(k, frm, dtype=np.int64) if np.isscalar(frm) else np.array(frm, dtype=np.int64)
+        )
+        self.to.append(
+            np.full(k, to, dtype=np.int64) if np.isscalar(to) else np.array(to, dtype=np.int64)
+        )
         self.day.append(np.array(day, dtype=np.int64))
         self.sec.append(np.array(sec, dtype=np.int64))
 
     def add_one(self, user, spell, etype, frm, to, day, sec):
-        self.add(np.array([user]), np.array([spell]), etype, frm, to,
-                 np.array([day]), np.array([sec]))
+        self.add(
+            np.array([user]), np.array([spell]), etype, frm, to, np.array([day]), np.array([sec])
+        )
 
     def frame(self, cal: Calendar) -> pd.DataFrame:
         if not self.user:
             return pd.DataFrame(
-                columns=["user_id", "spell_no", "event_type", "from_plan_id",
-                         "to_plan_id", "occurred_day", "occurred_at"]
+                columns=[
+                    "user_id",
+                    "spell_no",
+                    "event_type",
+                    "from_plan_id",
+                    "to_plan_id",
+                    "occurred_day",
+                    "occurred_at",
+                ]
             )
         day = np.concatenate(self.day)
         sec = np.concatenate(self.sec)
-        return pd.DataFrame(
-            {
-                "user_id": np.concatenate(self.user),
-                "spell_no": np.concatenate(self.spell),
-                "event_type": np.concatenate(self.etype),
-                "from_plan_id": np.concatenate(self.frm),
-                "to_plan_id": np.concatenate(self.to),
-                "occurred_day": day,
-                "occurred_at": timestamps_from_days(cal.start, day, sec),
-            }
-        ).sort_values("occurred_at", kind="stable").reset_index(drop=True)
+        return (
+            pd.DataFrame(
+                {
+                    "user_id": np.concatenate(self.user),
+                    "spell_no": np.concatenate(self.spell),
+                    "event_type": np.concatenate(self.etype),
+                    "from_plan_id": np.concatenate(self.frm),
+                    "to_plan_id": np.concatenate(self.to),
+                    "occurred_day": day,
+                    "occurred_at": timestamps_from_days(cal.start, day, sec),
+                }
+            )
+            .sort_values("occurred_at", kind="stable")
+            .reset_index(drop=True)
+        )
 
 
 def _finalize_events(events: pd.DataFrame, plan_index: PlanIndex) -> pd.DataFrame:
@@ -338,17 +389,30 @@ def _derive_subscriptions(
             else _NAT
         )
         rows.append(
-            (sub, user_id, plan if plan > 0 else pd.NA, status,
-             trial_start_at if trial_start_at is not None else _NAT,
-             trial_end_at,
-             started_at if started_at is not None else _NAT,
-             canceled_at)
+            (
+                sub,
+                user_id,
+                plan if plan > 0 else pd.NA,
+                status,
+                trial_start_at if trial_start_at is not None else _NAT,
+                trial_end_at,
+                started_at if started_at is not None else _NAT,
+                canceled_at,
+            )
         )
 
     df = pd.DataFrame(
         rows,
-        columns=["subscription_id", "user_id", "plan_id", "status",
-                 "trial_start_at", "trial_end_at", "started_at", "canceled_at"],
+        columns=[
+            "subscription_id",
+            "user_id",
+            "plan_id",
+            "status",
+            "trial_start_at",
+            "trial_end_at",
+            "started_at",
+            "canceled_at",
+        ],
     )
     df["plan_id"] = df["plan_id"].astype("Int64")
     for c in ("trial_start_at", "trial_end_at", "started_at", "canceled_at"):
