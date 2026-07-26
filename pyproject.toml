@@ -51,6 +51,8 @@ extend-select = ["I"]
 [tool.ruff.lint.per-file-ignores]
 # typer uses function calls in argument defaults by design.
 "src/fake_companies/cli.py" = ["B008"]
+# tests unpack shared fixtures and don't use every element.
+"tests/**" = ["RUF059"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
