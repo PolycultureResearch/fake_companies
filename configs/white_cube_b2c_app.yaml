@@ -1,0 +1,267 @@
+# White Cube — B2C subscription app for visual artists.
+#
+# Artists use it to organize an archive of digital images and files, track what
+# showed in which exhibition, and log what sold. Freemium with a 7-day trial.
+#
+# This scenario backs the Breakdown demo instance: four scripted anomalies, each
+# chosen so a metric-tree RCA can recover the whole chain, plus data-quality
+# events and two surprises for ambient realism. The demo's guided tour and the
+# windows below are kept in sync in breakdown/knowledge/demo_guided_tour.md.
+#
+# Everything here is validated 1:1 by config/schema.py:ScenarioConfig.
+company:
+  name: White Cube
+  slug: white_cube
+  currency: USD
+  industry: b2c_saas
+
+seed: 20240601
+
+timeline:
+  start: 2024-06-01
+  days: 790 # -> 2026-07-30
+
+calendar:
+  holiday_country: US
+  holiday_effect: 0.88
+  annual_amp: 0.14 # +-14% annual cycle
+  annual_peak_doy: 300 # peaks late October — art season and portfolio pushes
+
+# Artists work weekends; the acquisition dip is much shallower than B2B.
+weekly_shape: [1.02, 1.04, 1.03, 1.01, 0.99, 0.95, 0.96]
+
+noise:
+  day_sigma: 0.07
+  ar1: 0.35
+
+traffic:
+  duration_seconds_mean: 240 # long sessions — people are uploading and tagging
+  page_views_mean: 6.5
+  channels:
+    organic:
+      kind: organic
+      baseline: 180
+      growth: { kind: logistic, capacity: 5.5, steepness: 0.005 }
+    paid_social: # the artist channel — image-led feeds
+      kind: paid
+      spend_baseline: 260
+      spend_growth: { kind: exponential, rate: 0.0016 }
+      cpc: 0.9
+    paid_search:
+      kind: paid
+      spend_baseline: 220
+      spend_growth: { kind: exponential, rate: 0.0014 }
+      cpc: 1.4
+    display:
+      kind: paid
+      spend_baseline: 40
+      spend_growth: { kind: linear, rate: 0.0008 }
+      cpc: 0.5
+    direct:
+      kind: fixed
+      baseline: 70
+      growth: { kind: linear, rate: 0.0022 }
+    referral: # artists tell other artists
+      kind: fixed
+      baseline: 45
+      growth: { kind: linear, rate: 0.0026 }
+    email:
+      kind: fixed
+      baseline: 25
+      growth: { kind: linear, rate: 0.003 }
+
+mix:
+  country:
+    US: 0.34
+    BR: 0.09
+    GB: 0.08
+    DE: 0.08
+    FR: 0.07
+    MX: 0.06
+    CA: 0.06
+    ES: 0.05
+    JP: 0.05
+    AU: 0.04
+    IT: 0.04
+    AR: 0.04
+  device:
+    mobile: 0.52 # phone-first: photograph the work, upload it on the spot
+    desktop: 0.38
+    tablet: 0.10
+
+funnel:
+  signup_rate:
+    organic: 0.034
+    paid_social: 0.030
+    paid_search: 0.042
+    display: 0.012
+    direct: 0.055
+    referral: 0.062
+    email: 0.075
+  signup_rate_default: 0.020
+  trial_start_rate: 0.45
+
+plans:
+  plans:
+    - { name: free, monthly_price: 0, annual_price: 0 }
+    - { name: studio, monthly_price: 12, annual_price: 120 }
+    - { name: professional, monthly_price: 29, annual_price: 290 }
+  plan_mix:
+    studio: 0.72
+    professional: 0.28
+  annual_share: 0.28
+
+lifecycle:
+  trial_days: 7 # the tree's lagged edge is exactly this
+  trial_convert: 0.22
+  monthly_churn:
+    studio: 0.045
+    professional: 0.028
+  monthly_upgrade: 0.018
+  monthly_downgrade: 0.008
+  monthly_resurrect: 0.012
+
+engagement:
+  dau_over_active:
+    free: 0.04
+    studio: 0.14
+    professional: 0.24
+  events_per_active_day:
+    free: 4
+    studio: 12
+    professional: 22
+  frailty_sigma: 0.65
+  weekend_uplift: 1.25 # studio time is weekend time
+  feature_mix:
+    upload_work: 0.28
+    tag_work: 0.16
+    search_archive: 0.14
+    create_exhibition: 0.11
+    export_portfolio: 0.09
+    log_sale: 0.08
+    share_link: 0.08
+    view_dashboard: 0.06
+
+loading:
+  sources:
+    ad_platform: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+    web: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 5, lag_sigma: 0.5 }
+    app_db: { cadence: micro_batch, batch_minutes: 60, lag_median_minutes: 10, lag_sigma: 0.4 }
+    billing: { cadence: micro_batch, batch_minutes: 30, lag_median_minutes: 3, lag_sigma: 0.4 }
+    product: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 2, lag_sigma: 0.4 }
+
+anomalies:
+  scripted:
+    # --- Story C (positive): a Brazil-targeted campaign lands well ----------- #
+    # Two parts, so the tree can split volume from quality: spend ramps (buys
+    # traffic) and the Brazilian slice converts unusually well (quality).
+    - name: latam_campaign_spend_ramp
+      kind: rate
+      type: ramp
+      target: spend.paid_social
+      window: { start: 2025-03-03, end: 2025-04-13 }
+      magnitude: 1.35 # +35% paid-social spend, ramped then held
+
+    # The lift has to span the channels the campaign actually touched, not just
+    # the one it was bought on: Brazil is 9% of traffic and paid-social is ~18%
+    # of signups, so a paid-social-only lift is ~1.6% of the funnel and never
+    # rises above noise when sliced. Spilling into organic and referral (which
+    # is what an influencer-led campaign does) puts BR's share of the gap far
+    # enough above its 9% baseline share for the slice to find it.
+    - name: latam_campaign_brazil_lift_paid_social
+      kind: rate
+      type: level_shift
+      target: signup_rate.paid_social
+      window: { start: 2025-03-03, end: 2025-05-25 }
+      magnitude: 2.20 # Brazil only — invisible in the topline until you slice
+      segment: { country: BR }
+
+    - name: latam_campaign_brazil_lift_organic
+      kind: rate
+      type: level_shift
+      target: signup_rate.organic
+      window: { start: 2025-03-03, end: 2025-05-25 }
+      magnitude: 2.20
+      segment: { country: BR }
+
+    - name: latam_campaign_brazil_lift_referral
+      kind: rate
+      type: level_shift
+      target: signup_rate.referral
+      window: { start: 2025-03-03, end: 2025-05-25 }
+      magnitude: 2.20
+      segment: { country: BR }
+
+    # --- Story D (positive): onboarding revamp lifts trial conversion ------- #
+    # Deliberately unsegmented: a clean "did our change work" read where the
+    # tree separates conversion quality from trial volume.
+    # The lift has to clear the trend. White Cube is in the steep part of its
+    # growth curve here, so an eight-week window pair carries ~25% underlying
+    # growth in trial volume — a +25% conversion lift would be attributed to
+    # volume, not quality, which is the opposite of the story. Hence a larger
+    # lift, read over adjacent four-week windows.
+    - name: onboarding_revamp
+      kind: rate
+      type: level_shift
+      target: trial_convert
+      window: { start: 2025-08-04, end: 2025-11-30 }
+      magnitude: 1.45 # +45% trial->paid conversion
+
+    # --- Story A (negative): a release breaks the mobile signup CTA ---------- #
+    # Confined to mobile sessions on paid-social landing pages. Flows through
+    # signups -> trials -> (7-day trial) -> conversions -> new MRR.
+    - name: mobile_signup_cta_regression
+      kind: rate
+      type: level_shift
+      target: signup_rate.paid_social
+      window: { start: 2026-02-02, end: 2026-03-15 }
+      magnitude: 0.55 # -45% signup rate, mobile only
+      segment: { device: mobile }
+
+    # --- Story B (negative): professional-tier churn spike ------------------ #
+    # Spans two full 30-day lifecycle buckets so the level shift is
+    # unambiguous — churn events are placed within a bucket, not on the day.
+    - name: professional_churn_spike
+      kind: rate
+      type: level_shift
+      target: churn.professional
+      window: { start: 2026-04-27, end: 2026-06-28 }
+      magnitude: 1.9 # +90% churn hazard among professional subscribers
+
+    # --- Data-quality events (observation layer; business truth unchanged) --- #
+    # Held well clear of the story windows so they never muddy a canned RCA.
+    - name: product_pipeline_outage
+      kind: dq
+      type: volume_dropout
+      target: product.events
+      window: { start: 2024-11-12, end: 2024-11-13 }
+      magnitude: 0.3 # events land at 30% of normal volume
+
+    - name: sessions_country_null_spike
+      kind: dq
+      type: null_spike
+      target: web.sessions
+      window: { start: 2025-06-16, end: 2025-06-18 }
+      magnitude: 0.25
+      params: { column: country }
+
+    - name: payments_double_charge_dupes
+      kind: dq
+      type: duplicate_rows
+      target: billing.payments
+      window: { start: 2025-12-08, end: 2025-12-08 }
+      magnitude: 0.1
+
+  # Ambient realism. Excluded from every story window (plus a margin) so a
+  # canned analysis never picks up a second, unscripted cause.
+  surprise:
+    count: 2
+    kinds: [rate, dq]
+    magnitude: { min: 0.6, max: 1.6 }
+    min_gap_days: 21
+    exclude_windows:
+      - { start: 2024-06-01, end: 2024-08-01 } # keep the warm-up clean
+      - { start: 2025-01-13, end: 2025-06-08 } # story C + its reference window
+      - { start: 2025-06-16, end: 2025-10-05 } # story D + its reference window
+      - { start: 2025-12-22, end: 2026-03-29 } # story A + its reference window
+      - { start: 2026-03-02, end: 2026-07-30 } # story B + its reference window
