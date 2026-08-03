@@ -138,6 +138,38 @@ metrics:
         name: churned_mrr
         fill_nulls_with: 0
 
+  - name: net_new_mrr
+    description: Net MRR movement — new + expansion less contraction and churn.
+    type: derived
+    label: Net New MRR
+    type_params:
+      expr: new_mrr + expansion_mrr - contraction_mrr - churned_mrr
+      metrics:
+        - name: new_mrr
+        - name: expansion_mrr
+        - name: contraction_mrr
+        - name: churned_mrr
+
+  - name: new_arpu
+    description: Average MRR per new paid subscription (new MRR / new subscriptions).
+    type: derived
+    label: New ARPU
+    type_params:
+      expr: new_mrr / nullif(new_subscriptions, 0)
+      metrics:
+        - name: new_mrr
+        - name: new_subscriptions
+
+  - name: churn_arpu
+    description: Average MRR lost per cancellation (churned MRR / churned subscriptions).
+    type: derived
+    label: Churn ARPU
+    type_params:
+      expr: churned_mrr / nullif(churned_subscriptions, 0)
+      metrics:
+        - name: churned_mrr
+        - name: churned_subscriptions
+
   - name: arpu
     description: Average revenue per active subscription (MRR / active subscriptions).
     type: derived
