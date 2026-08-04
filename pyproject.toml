@@ -46,6 +46,15 @@ module-root = "src"
 line-length = 100
 target-version = "py313"
 
+[tool.ruff.format]
+# Ruff formats Python inside fenced Markdown code blocks. In docs those blocks
+# are illustrative rather than executable — `docs/roadmap.md`'s `Vertical`
+# protocol sketch aligns its trailing comments into a column on purpose — and
+# reformatting them costs readability to satisfy a rule they were never written
+# against. Scoped to Markdown only, so a real .py placed under docs/ is still
+# formatted like any other source file.
+exclude = ["docs/**/*.md"]
+
 [tool.ruff.lint]
 extend-select = ["I"]
 

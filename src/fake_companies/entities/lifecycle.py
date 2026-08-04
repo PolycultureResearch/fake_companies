@@ -214,7 +214,9 @@ def _apply_hazards(
             j = survive[k]
             period = plan_index.row(int(plan_id[j])).billing_period
             to = plan_index.id_for(ladder[tier[k] + step], period)
-            ev.add_one(uid[j], spell_no[j], direction, int(plan_id[j]), to, *_one_day(gen, m, n_days))
+            ev.add_one(
+                uid[j], spell_no[j], direction, int(plan_id[j]), to, *_one_day(gen, m, n_days)
+            )
             plan_id[j] = to
 
 
