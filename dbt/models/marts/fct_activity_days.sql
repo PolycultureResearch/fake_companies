@@ -33,6 +33,7 @@ select
     event_date,
     event_count,
     plan,
+    plan != '{{ var("free_plan", "free") }}' as is_paying,
     country,
     device
 from daily

@@ -112,7 +112,7 @@ plans:
   annual_share: 0.28
 
 lifecycle:
-  trial_days: 7 # the tree's lagged edge is exactly this
+  trial_days: 7 # the tree's lagged identity is exactly this
   trial_convert: 0.22
   monthly_churn:
     studio: 0.045
@@ -120,6 +120,19 @@ lifecycle:
   monthly_upgrade: 0.018
   monthly_downgrade: 0.008
   monthly_resurrect: 0.012
+  # The third way in: free users who subscribe without ever trialing.
+  # ~0.4%/month of a growing free pool -> roughly 15% of new subscriptions.
+  monthly_direct_convert: 0.004
+  # Engagement -> conversion: an activated trial (uploaded work) converts
+  # ~2.6x a non-activated one, each extra active day multiplies by 1.15;
+  # renormalized so trial_convert stays the realized cohort mean.
+  activation_conversion_boost: 2.6
+  days_active_conversion_boost: 1.15
+  # Engagement -> churn: hazard rides member_engagement^-2 (the month-mean
+  # of the shared day driver; cancel days land where daily engagement is
+  # low) and frailty^-0.5 (inactive members churn more).
+  churn_engagement_gamma: 2.0
+  churn_frailty_gamma: 0.5
 
 engagement:
   dau_over_active:
@@ -132,6 +145,10 @@ engagement:
     professional: 22
   frailty_sigma: 0.65
   weekend_uplift: 1.25 # studio time is weekend time
+  trial_activation_event: upload_work # the aha moment: the archive gets its first piece
+  trial_intensity_boost: 4.0 # trialists actively try the product, ~4x the idle free tier
+  trial_engagement_sigma_scale: 2.0 # +-14% AR(1) day driver shared by activity & conversion
+  member_engagement_sigma_scale: 1.5 # +-10% day driver shared by paid usage & churn
   feature_mix:
     upload_work: 0.28
     tag_work: 0.16
@@ -192,20 +209,25 @@ anomalies:
       magnitude: 2.20
       segment: { country: BR }
 
-    # --- Story D (positive): onboarding revamp lifts trial conversion ------- #
+    # --- Story D (positive): onboarding revamp lifts trial engagement ------- #
     # Deliberately unsegmented: a clean "did our change work" read where the
-    # tree separates conversion quality from trial volume.
+    # tree separates conversion quality from trial volume. The revamp lands on
+    # the *engagement* driver, not the conversion probability directly: more
+    # trialists activate and use more days, and conversion follows through the
+    # activation/days-active boosts — so an RCA on trial_conversion_rate ranks
+    # trial_activation_rate as the cause, which is the mechanism a real
+    # onboarding change would move.
     # The lift has to clear the trend. White Cube is in the steep part of its
     # growth curve here, so an eight-week window pair carries ~25% underlying
-    # growth in trial volume — a +25% conversion lift would be attributed to
-    # volume, not quality, which is the opposite of the story. Hence a larger
-    # lift, read over adjacent four-week windows.
+    # growth in trial volume — a conversion lift near that would be attributed
+    # to volume, not quality, which is the opposite of the story. Hence a
+    # large engagement lift, read over adjacent four-week windows.
     - name: onboarding_revamp
       kind: rate
       type: level_shift
-      target: trial_convert
+      target: trial_engagement
       window: { start: 2025-08-04, end: 2025-11-30 }
-      magnitude: 1.45 # +45% trial->paid conversion
+      magnitude: 2.0 # trial-window engagement doubles; conversion follows via the boosts
 
     # --- Story A (negative): a release breaks the mobile signup CTA ---------- #
     # Confined to mobile sessions on paid-social landing pages. Flows through
@@ -215,7 +237,12 @@ anomalies:
       type: level_shift
       target: signup_rate.paid_social
       window: { start: 2026-02-02, end: 2026-03-15 }
-      magnitude: 0.55 # -45% signup rate, mobile only
+      # -50% mobile signup rate. Was -45%: the engagement-edges rework grew the
+      # surprise target pool, which re-drew the ambient noise from Sept 2024 on,
+      # and under the new draw mobile's excess-over-gap fell to 22.8% — under
+      # the 25% the slice panel needs. The story has to localize, so it is
+      # planted a notch deeper.
+      magnitude: 0.50
       segment: { device: mobile }
 
     # --- Story B (negative): professional-tier churn spike ------------------ #
@@ -226,7 +253,11 @@ anomalies:
       type: level_shift
       target: churn.professional
       window: { start: 2026-04-27, end: 2026-06-28 }
-      magnitude: 1.9 # +90% churn hazard among professional subscribers
+      # +130% churn hazard among professional subscribers. Was +90%: the
+      # engagement machinery now moves ambient churn too (member_engagement
+      # suppressed studio churn inside this story's analysis window), so the
+      # planted spike has to clear that as well as the trend.
+      magnitude: 2.3
 
     # --- Data-quality events (observation layer; business truth unchanged) --- #
     # Held well clear of the story windows so they never muddy a canned RCA.

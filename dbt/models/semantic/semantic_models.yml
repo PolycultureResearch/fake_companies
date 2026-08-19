@@ -121,6 +121,14 @@ semantic_models:
         description: Count of trials that converted to paid.
         agg: sum
         expr: "case when converted then 1 else 0 end"
+      - name: activated_trials
+        description: Trials whose user performed the activation event in-window.
+        agg: sum
+        expr: "case when activated then 1 else 0 end"
+      - name: trial_active_days
+        description: Total distinct active days across trials (ratio numerator).
+        agg: sum
+        expr: days_active
 
   # ----------------------------------------------------------------------- #
   # Subscriptions & MRR
@@ -167,9 +175,17 @@ semantic_models:
         agg: sum
         expr: churned_mrr_amount
       - name: new_subscriptions
-        description: Count of trial conversions (new paid subscriptions).
+        description: New paid subscriptions (trial conversions + reactivations + direct).
         agg: sum
         expr: is_new_subscription
+      - name: reactivations
+        description: Paid subscriptions started by returning (churned or lapsed-trial) users.
+        agg: sum
+        expr: is_reactivation
+      - name: direct_conversions
+        description: Paid subscriptions started without a trial.
+        agg: sum
+        expr: is_direct_conversion
       - name: churned_subscriptions
         description: Count of cancellations.
         agg: sum
@@ -208,6 +224,10 @@ semantic_models:
         description: Distinct active subscriptions on each day.
         agg: count_distinct
         expr: subscription_id
+      - name: subscription_day_count
+        description: Subscription-days (member-days; activity-rate denominator).
+        agg: sum
+        expr: 1
 
   # ----------------------------------------------------------------------- #
   # Billing
@@ -306,6 +326,14 @@ semantic_models:
         description: Distinct active users.
         agg: count_distinct
         expr: user_id
+      - name: paying_active_users
+        description: Distinct active users on a paid plan (member-activity numerator).
+        agg: count_distinct
+        expr: "case when is_paying then user_id end"
+      - name: paying_user_days
+        description: Paying active user-days (member-activity numerator, sums cleanly).
+        agg: sum
+        expr: "case when is_paying then 1 else 0 end"
 
   - name: product_events
     description: Product usage events (one row per event).

@@ -47,11 +47,27 @@ def build_all(
     frames["web.sessions"] = sessions
     frames["app_db.users"] = users
 
+    # Shared per-user engagement propensity: one latent drives trial activity,
+    # conversion, churn and usage alike (the realistic confounding the demo's
+    # learned edges recover). Generated once, passed everywhere.
+    from .trial_activity import build_trial_activity, user_frailty
+
+    n_users = int(users["user_id"].max()) if len(users) else 0
+    frailty = user_frailty(rng.stream("frailty"), n_users, cfg.engagement.frailty_sigma)
+
+    # Trial-window activity runs BEFORE the lifecycle: engagement during the
+    # trial causes conversion, so it has to exist first.
+    trial_events, trial_stats = build_trial_activity(
+        cfg, cal, rng, panel, plan_index, frames, frailty
+    )
+
     # --- M3: lifecycle + billing (added in later milestones) --------------- #
     if _has_module("lifecycle"):
         from .lifecycle import build_lifecycle
 
-        build_lifecycle(cfg, cal, rng, panel, plan_index, frames)
+        build_lifecycle(
+            cfg, cal, rng, panel, plan_index, frames, trial_stats=trial_stats, frailty=frailty
+        )
     if _has_module("billing"):
         from .billing import build_billing
 
@@ -61,7 +77,9 @@ def build_all(
     if _has_module("usage"):
         from .usage import build_usage
 
-        build_usage(cfg, cal, rng, panel, plan_index, frames)
+        build_usage(
+            cfg, cal, rng, panel, plan_index, frames, frailty=frailty, trial_events=trial_events
+        )
 
 
 def _has_module(name: str) -> bool:

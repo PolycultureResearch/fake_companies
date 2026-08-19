@@ -1,13 +1,13 @@
 -- One row per MRR-moving subscription event. Grain: event_id.
 -- Movement amount uses monthly-equivalent price (annual = price/12), so
 -- movements telescope to active MRR. Category buckets:
---   trial_convert -> new, resurrect -> new (reactivation),
+--   trial_convert -> new, resurrect -> new (reactivation), direct_convert -> new,
 --   upgrade -> expansion, downgrade -> contraction, cancel -> churned.
 with events as (
 
     select *
     from {{ ref('stg_subscription_events') }}
-    where event_type in ('trial_convert', 'resurrect', 'upgrade', 'downgrade', 'cancel')
+    where event_type in ('trial_convert', 'resurrect', 'direct_convert', 'upgrade', 'downgrade', 'cancel')
 
 ),
 
@@ -37,7 +37,7 @@ categorized as (
         *,
         to_monthly_price - from_monthly_price as movement_amount,
         case
-            when event_type in ('trial_convert', 'resurrect') then 'new'
+            when event_type in ('trial_convert', 'resurrect', 'direct_convert') then 'new'
             when event_type = 'upgrade'                       then 'expansion'
             when event_type = 'downgrade'                     then 'contraction'
             when event_type = 'cancel'                        then 'churned'
@@ -62,6 +62,8 @@ select
     case when category = 'expansion'   then movement_amount     else 0.0 end as expansion_mrr_amount,
     case when category = 'contraction' then -movement_amount    else 0.0 end as contraction_mrr_amount,
     case when category = 'churned'     then -movement_amount    else 0.0 end as churned_mrr_amount,
-    case when event_type = 'trial_convert' then 1 else 0 end as is_new_subscription,
+    case when category = 'new'         then 1 else 0 end as is_new_subscription,
+    case when event_type = 'resurrect'     then 1 else 0 end as is_reactivation,
+    case when event_type = 'direct_convert' then 1 else 0 end as is_direct_conversion,
     case when event_type = 'cancel'        then 1 else 0 end as is_churned_subscription
 from categorized
