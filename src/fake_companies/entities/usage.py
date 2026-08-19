@@ -30,6 +30,8 @@ def build_usage(
     panel: DriverPanel,
     plan_index: PlanIndex,
     frames: dict[str, pd.DataFrame],
+    frailty: np.ndarray | None = None,
+    trial_events: pd.DataFrame | None = None,
 ) -> None:
     users = frames["app_db.users"]
     if len(users) == 0:
@@ -47,7 +49,24 @@ def build_usage(
     created_day[uid0] = users["day_index"].to_numpy(dtype=np.int64)
     country[uid0] = users["country"].to_numpy()
     device[uid0] = users["device_at_signup"].to_numpy()
-    frailty = _frailty(gen, n_users, cfg.engagement.frailty_sigma)
+    # The shared engagement propensity when the orchestrator provides it (so
+    # the same latent drives usage, conversion and churn); a local draw
+    # otherwise, preserving the standalone behavior.
+    if frailty is None:
+        frailty = _frailty(gen, n_users, cfg.engagement.frailty_sigma)
+
+    # Trial windows are covered by trial_activity.py when its events are
+    # handed in — the free segment then starts at trial end, so no user-day is
+    # generated twice.
+    trial_end_day = created_day.copy()
+    if trial_events is not None:
+        started_trial = np.zeros(n_users, dtype=bool)
+        started_trial[uid0] = users["started_trial"].to_numpy(dtype=bool)
+        trial_end_day = np.where(
+            started_trial,
+            np.minimum(created_day + cfg.lifecycle.trial_days, n_days),
+            created_day,
+        )
 
     # --- assemble plan segments -------------------------------------------- #
     # Plans that generate events = the engagement config's plan keys; the free /
@@ -83,11 +102,12 @@ def build_usage(
                 seg_start[plan].append(p_start[m])
                 seg_end[plan].append(p_end[m])
 
-    # free/baseline segment for every user: [created_day, first_paid_start)
+    # free/baseline segment for every user: [created_day, first_paid_start) —
+    # starting at trial end where trial_activity already generated the window.
     if free_name is not None:
         free_end = np.minimum(first_paid, n_days)
         seg_user[free_name].append(uid0)
-        seg_start[free_name].append(created_day[uid0])
+        seg_start[free_name].append(trial_end_day[uid0])
         seg_end[free_name].append(free_end[uid0])
 
     # --- generate events per plan group ------------------------------------ #
@@ -102,10 +122,14 @@ def build_usage(
         su, ss, se = su[valid], ss[valid], se[valid]
         if len(su) == 0:
             continue
-        part = _events_for_plan(cfg, cal, gen, panel, plan, su, ss, se, frailty, country, device)
+        part = _events_for_plan(
+            cfg, cal, gen, panel, plan, su, ss, se, frailty, country, device, plan != free_name
+        )
         if part is not None:
             parts.append(part)
 
+    if trial_events is not None and len(trial_events):
+        parts.append(trial_events)
     if not parts:
         frames["product.events"] = _empty_events()
         return
@@ -117,10 +141,15 @@ def build_usage(
     frames["product.events"] = df
 
 
-def _events_for_plan(cfg, cal, gen, panel, plan, su, ss, se, frailty, country, device):
+def _events_for_plan(cfg, cal, gen, panel, plan, su, ss, se, frailty, country, device, paid=False):
     weekend = np.isin(cal.dow, [5, 6])
     lam = panel.get(f"dau_over_active.{plan}") * panel.get(f"events_per_active_day.{plan}")
     lam = lam * np.where(weekend, cfg.engagement.weekend_uplift, 1.0)
+    if paid:
+        # Paid-tier usage rides the shared member_engagement driver — the same
+        # one that (inversely) scales churn hazard in lifecycle.py, which is
+        # what makes the member-activity -> churn edge learnable weekly.
+        lam = lam * panel.get("member_engagement")
 
     # prefix integral P[d] = sum(lam[:d]); length n_days + 1
     prefix = np.concatenate([[0.0], np.cumsum(lam)])

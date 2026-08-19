@@ -65,14 +65,66 @@ metrics:
       numerator: trial_conversions
       denominator: trials_started
 
+  - name: activated_trials
+    description: Trials whose user performed the activation event in-window.
+    type: simple
+    label: Activated Trials
+    type_params:
+      measure:
+        name: activated_trials
+        fill_nulls_with: 0
+
+  - name: trial_active_days
+    description: Total distinct active days across trials (ratio numerator).
+    type: simple
+    label: Trial Active Days
+    type_params:
+      measure:
+        name: trial_active_days
+        fill_nulls_with: 0
+
+  - name: trial_activation_rate
+    description: Share of trials that performed the activation event in-window.
+    type: ratio
+    label: Trial Activation Rate
+    type_params:
+      numerator: activated_trials
+      denominator: trials_started
+
+  - name: trial_days_active
+    description: Mean distinct active days per trial (of the trial window).
+    type: ratio
+    label: Trial Days Active
+    type_params:
+      numerator: trial_active_days
+      denominator: trials_started
+
   # --- Subscriptions & MRR -------------------------------------------------
   - name: new_subscriptions
-    description: New paid subscriptions (trial conversions).
+    description: New paid subscriptions (trial conversions + reactivations + direct).
     type: simple
     label: New Subscriptions
     type_params:
       measure:
         name: new_subscriptions
+        fill_nulls_with: 0
+
+  - name: reactivations
+    description: Paid subscriptions started by returning (churned or lapsed-trial) users.
+    type: simple
+    label: Reactivations
+    type_params:
+      measure:
+        name: reactivations
+        fill_nulls_with: 0
+
+  - name: direct_conversions
+    description: Paid subscriptions started without a trial.
+    type: simple
+    label: Direct Conversions
+    type_params:
+      measure:
+        name: direct_conversions
         fill_nulls_with: 0
 
   - name: churned_subscriptions
@@ -189,6 +241,43 @@ metrics:
       denominator: active_subscriptions
 
   # --- Product usage -------------------------------------------------------
+  - name: paying_active_users
+    description: Distinct active users on a paid plan each day.
+    type: simple
+    label: Paying Active Users
+    type_params:
+      measure:
+        name: paying_active_users
+        fill_nulls_with: 0
+
+  - name: paying_user_days
+    description: Paying active user-days (member-activity numerator).
+    type: simple
+    label: Paying User Days
+    type_params:
+      measure:
+        name: paying_user_days
+        fill_nulls_with: 0
+
+  - name: subscription_day_count
+    description: Subscription-days (member-days; member-activity denominator).
+    type: simple
+    label: Subscription Days
+    type_params:
+      measure:
+        name: subscription_day_count
+        fill_nulls_with: 0
+
+  - name: member_activity_rate
+    description: Share of member-days with product activity (mean daily active share).
+    type: derived
+    label: Member Activity Rate
+    type_params:
+      expr: paying_user_days / nullif(subscription_day_count, 0)
+      metrics:
+        - name: paying_user_days
+        - name: subscription_day_count
+
   - name: dau
     description: Daily active users.
     type: simple

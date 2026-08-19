@@ -36,7 +36,11 @@ def known_drivers(cfg: ScenarioConfig) -> set[str]:
     names.add("trial_convert")
     for plan in cfg.lifecycle.monthly_churn:
         names.add(f"churn.{plan}")
-    names.update({"upgrade", "downgrade", "resurrect"})
+    names.update({"upgrade", "downgrade", "resurrect", "direct_convert"})
+    # Shared engagement drivers (read topline-only by the entities, so a
+    # segmented anomaly on these would be a silent no-op — target them
+    # unsegmented).
+    names.update({"trial_engagement", "member_engagement"})
     for plan in cfg.engagement.dau_over_active:
         names.add(f"dau_over_active.{plan}")
     for plan in cfg.engagement.events_per_active_day:
@@ -113,6 +117,18 @@ def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPane
     panel.set("upgrade", _prob(cfg.lifecycle.monthly_upgrade * noise("upgrade", 0.5)))
     panel.set("downgrade", _prob(cfg.lifecycle.monthly_downgrade * noise("downgrade", 0.5)))
     panel.set("resurrect", _prob(cfg.lifecycle.monthly_resurrect * noise("resurrect", 0.5)))
+    panel.set(
+        "direct_convert", _prob(cfg.lifecycle.monthly_direct_convert * noise("direct_convert", 0.5))
+    )
+
+    # --- shared engagement drivers (mean ~1 multipliers) --------------------- #
+    # Each moves an activity intensity AND a lifecycle probability, which is
+    # what makes the corresponding metric-tree edge learnable from aggregates:
+    # without a shared time-varying driver, per-user coupling alone leaves the
+    # weekly series co-moving only through sampling noise.
+    eng = cfg.engagement
+    panel.set("trial_engagement", noise("trial_engagement", eng.trial_engagement_sigma_scale))
+    panel.set("member_engagement", noise("member_engagement", eng.member_engagement_sigma_scale))
 
     # --- engagement drivers ------------------------------------------------- #
     for plan, p in cfg.engagement.dau_over_active.items():
