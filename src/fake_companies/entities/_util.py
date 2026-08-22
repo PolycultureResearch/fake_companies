@@ -73,6 +73,35 @@ USAGE_HOUR_WEIGHTS = np.array(
 )
 
 
+# A user is never active *every* day: cap the per-day active probability so a
+# high-frailty user on a high-engagement plan still has idle days.
+MAX_P_ACTIVE = 0.95
+
+
+def active_day_mask(gen: np.random.Generator, p_active: np.ndarray) -> np.ndarray:
+    """Bernoulli active-day draw — the single reading of ``dau_over_active``.
+
+    ``dau_over_active`` is a *probability* (P(an eligible user is active on a
+    given day)), never an event-rate factor. Both activity generators
+    (``trial_activity`` for the trial window, ``usage`` for everything outside
+    it) gate their days through this helper, so the knob means one thing.
+    """
+    return gen.random(p_active.shape) < np.clip(p_active, 0.0, MAX_P_ACTIVE)
+
+
+def events_on_active_days(
+    gen: np.random.Generator, active: np.ndarray, events_per_active_day: np.ndarray
+) -> np.ndarray:
+    """Event counts *conditional on the day being active*: ``1 + Poisson(epd - 1)``.
+
+    Keeps the mean at the configured events-per-active-day while guaranteeing an
+    active day has at least one event (it is what made the day "active"). Inactive
+    days get zero, so ``dau_over_active`` alone sets the realized active share.
+    """
+    lam_extra = np.maximum(events_per_active_day - 1.0, 0.0)
+    return np.where(active, 1 + gen.poisson(lam_extra), 0)
+
+
 def poisson_counts(gen: np.random.Generator, rates: np.ndarray) -> np.ndarray:
     """Draw independent Poisson counts for an array of daily rates."""
     return gen.poisson(np.maximum(rates, 0.0)).astype(np.int64)

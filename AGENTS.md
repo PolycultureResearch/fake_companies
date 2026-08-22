@@ -27,8 +27,9 @@ event_time + `_loaded_at` columns).
    causally downstream (signup-rate drop → fewer trials → less MRR).
 2. `src/fake_companies/entities/` — entity-level simulation drawn stochastically from
    the latent rates (Poisson sessions, binomial signups, hazard-based subscription
-   lifecycles, NHPP usage events, billing). Never write aggregates directly — aggregate
-   realism must emerge from raw rows.
+   lifecycles, Bernoulli active days then usage events conditional on active,
+   billing). Never write aggregates directly — aggregate realism must emerge from
+   raw rows.
 3. `src/fake_companies/corruption/` — observation layer: `_loaded_at` connector models
    and data-quality corruptions (volume_dropout, null_spike, distribution_shift,
    loading_delay, duplicate_rows). Business truth unchanged; only observed rows mutate.
