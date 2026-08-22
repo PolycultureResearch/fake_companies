@@ -26,7 +26,7 @@ Devon develops two analytics packages — **Breakdown** (Bayesian metric-tree RC
 ## Architecture: three-layer latent-rate simulation
 
 1. **Latent driver panel (macro):** config-driven daily rates per (driver, segment): `rate = baseline × growth(t) × weekly(dow) × annual(doy) × holiday × AR(1)-lognormal noise × anomaly multiplier`. **Rate anomalies (spike/drop, level_shift, trend_change, seasonality_change) are applied here** so effects propagate causally downstream (spend cut → sessions → signups → MRR) — exactly what Breakdown's RCA should recover.
-2. **Entity simulation (micro):** raw rows drawn from latent rates — sessions ~ Poisson, signups ~ Binomial, per-user lifecycle hazard state machine (trial/convert/churn/upgrade/downgrade/resurrect), NHPP usage events with per-user lognormal frailty, billing from subscription spells (incl. dunning/failures). Aggregate realism *emerges*; nothing aggregate is written directly.
+2. **Entity simulation (micro):** raw rows drawn from latent rates — sessions ~ Poisson, signups ~ Binomial, per-user lifecycle hazard state machine (trial/convert/churn/upgrade/downgrade/resurrect), usage as Bernoulli(dau_over_active) active days x events-per-active-day with per-user lognormal frailty, billing from subscription spells (incl. dunning/failures). Aggregate realism *emerges*; nothing aggregate is written directly.
 3. **Post-hoc corruption + loading model:** `_loaded_at` from per-source connector models (batch cadence + lognormal lag). Data-quality anomalies (volume_dropout, null_spike, distribution_shift, loading_delay, duplicate_rows) mutate finished raw frames — observation corruptions, matching Tremor dataflow semantics.
 
 **Ground truth:** every injected event emits a `GroundTruthRecord` (pydantic: id, kind rate/dq, type, driver/table, segment, start/end, magnitude, affected_metrics/signals) → `meta.ground_truth` table + `ground_truth.json`.
@@ -54,7 +54,7 @@ fake_companies/
 │   ├── entities/funnel.py          # signups -> users (faker attrs)
 │   ├── entities/lifecycle.py       # subscription hazard state machine (vectorized cohorts)
 │   ├── entities/billing.py         # invoices + payments (dunning, ~3-5% failures)
-│   ├── entities/usage.py           # product events: NHPP per active user-day, frailty
+│   ├── entities/usage.py           # product events: Bernoulli active day, then events, frailty
 │   ├── corruption/loading.py       # _loaded_at connector models
 │   ├── corruption/dq.py            # apply_dq_events -> (tables, [GroundTruthRecord])
 │   ├── output/duckdb_writer.py     # schemas: ad_platform/web/app_db/billing/product/meta
@@ -169,8 +169,9 @@ event_time + `_loaded_at` columns).
    causally downstream (signup-rate drop → fewer trials → less MRR).
 2. `src/fake_companies/entities/` — entity-level simulation drawn stochastically from
    the latent rates (Poisson sessions, binomial signups, hazard-based subscription
-   lifecycles, NHPP usage events, billing). Never write aggregates directly — aggregate
-   realism must emerge from raw rows.
+   lifecycles, Bernoulli active days then usage events conditional on active,
+   billing). Never write aggregates directly — aggregate realism must emerge from
+   raw rows.
 3. `src/fake_companies/corruption/` — observation layer: `_loaded_at` connector models
    and data-quality corruptions (volume_dropout, null_spike, distribution_shift,
    loading_delay, duplicate_rows). Business truth unchanged; only observed rows mutate.

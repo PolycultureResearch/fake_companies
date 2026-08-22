@@ -31,7 +31,14 @@ from ..config import ScenarioConfig
 from ..core import RngHub
 from ..core.calendar import Calendar
 from ..latent import DriverPanel
-from ._util import USAGE_HOUR_WEIGHTS, intraday_seconds, sample_labels, timestamps_from_days
+from ._util import (
+    USAGE_HOUR_WEIGHTS,
+    active_day_mask,
+    events_on_active_days,
+    intraday_seconds,
+    sample_labels,
+    timestamps_from_days,
+)
 from .plans import PlanIndex
 
 
@@ -88,7 +95,6 @@ def build_trial_activity(
     created = trial_users["day_index"].to_numpy(dtype=np.int64)
     country = trial_users["country"].to_numpy()
     device = trial_users["device_at_signup"].to_numpy()
-    U = len(uid0)
 
     free_name = plan_index.free_name
     if free_name is None or free_name not in eng.dau_over_active:
@@ -105,16 +111,12 @@ def build_trial_activity(
     in_range = grid < n_days
     grid_c = np.minimum(grid, n_days - 1)
 
-    p_active = np.clip(day_rate[grid_c] * frailty[uid0][:, None], 0.0, 0.95)
+    p_active = day_rate[grid_c] * frailty[uid0][:, None]
     p_active[~in_range] = 0.0
-    active = gen.random((U, trial_days)) < p_active
+    active = active_day_mask(gen, p_active)
     stats.days_active[uid0] = active.sum(axis=1)
 
-    # Events on an active day: 1 + Poisson(epd - 1) keeps the mean at the
-    # configured events-per-active-day while guaranteeing an active day has at
-    # least one event (it is what made the day "active").
-    lam_extra = np.maximum(epd[grid_c] - 1.0, 0.0)
-    counts = np.where(active, 1 + gen.poisson(lam_extra), 0)
+    counts = events_on_active_days(gen, active, epd[grid_c])
     total = int(counts.sum())
     if total == 0:
         return None, stats

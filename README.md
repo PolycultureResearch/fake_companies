@@ -62,7 +62,7 @@ roughly:
 | table | rows | notes |
 |-------|------|-------|
 | `web.sessions` | ~1.3M | event_time + nullable user_id; PSI/volume targets |
-| `product.events` | ~7.5M | NHPP usage, diurnal + weekend shape (Tremor dataflow star) |
+| `product.events` | ~7.4M | Bernoulli active days, diurnal + weekend shape (Tremor dataflow star) |
 | `app_db.users` | ~50k | faker attributes |
 | `app_db.subscriptions` | ~31k spells | ~8.8k ever-paid; MRR movements telescope exactly |
 | `billing.payments` | ~— | dunning, ~5% failures (PSI on currency, quantiles on amount) |
@@ -80,7 +80,8 @@ Three separated layers (see `AGENTS.md` and `docs/plan.md`):
    → fewer signups → less MRR).
 2. **`entities/`** — raw rows drawn stochastically from the latent rates
    (Poisson sessions, binomial signups, hazard-based subscription lifecycles,
-   NHPP usage). Aggregate realism *emerges*; nothing aggregate is written directly.
+   Bernoulli active days then usage events conditional on being active).
+   Aggregate realism *emerges*; nothing aggregate is written directly.
 3. **`corruption/`** — observation layer: `_loaded_at` connector models and
    data-quality corruptions. Business truth unchanged; only observed rows mutate.
 

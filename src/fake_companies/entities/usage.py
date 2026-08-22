@@ -1,13 +1,27 @@
-"""``product.events`` — NHPP usage events per user, drawn from engagement drivers.
+"""``product.events`` — per-user daily activity, drawn from engagement drivers.
 
 Each user's timeline is split into plan segments (a free segment before any paid
-spell, then one segment per active subscription spell on its plan). For each
-plan, a daily intensity ``lam[d] = dau_over_active[d] * events_per_active_day[d]
-* weekend_uplift`` is taken from the latent panel (so engagement anomalies and
-the weekend uplift show up in the event stream). Per segment we draw a Poisson
-count from the integral of ``lam`` over the segment, then place each event on a
-day sampled ∝ ``lam`` (localizing dips) via an inverse-CDF search — all
-vectorized, three plan groups, no per-user loops.
+spell, then one segment per active subscription spell on its plan). Every
+user-day inside a segment is drawn in two steps, exactly as ``trial_activity``
+draws the trial window:
+
+1. **Is the user active?** ``p_active[u, d] = dau_over_active[plan][d] *
+   weekend_uplift[d] * member_engagement[d] (paid only) * frailty[u]``, capped at
+   ``MAX_P_ACTIVE``. So ``dau_over_active`` *is* the realized daily active share,
+   which is what the config says it is.
+2. **How many events, given active?** ``1 + Poisson(events_per_active_day - 1)``
+   — the conditional mean on an active day, zero otherwise.
+
+Both draws go through the shared helpers in ``_util`` so the two activity
+generators hold one reading of the knob. (Until 2026-08 this module instead
+multiplied ``dau_over_active`` into an NHPP intensity, ``lam = dau x
+events_per_active_day``: at lam ~1.7-5.3 events/day the realized active share
+came out 0.77-0.93 instead of the configured 0.14/0.24, which pinned the
+downstream ``member_activity_rate`` metric against its ceiling and left the
+weekly engagement signal squashed into the flat part of ``1 - exp(-lam)``.)
+
+The (segment x day) expansion is a ragged flat array processed in bounded chunks
+— vectorized throughout, no per-user or per-day Python loop.
 """
 
 from __future__ import annotations
@@ -19,8 +33,20 @@ from ..config import ScenarioConfig
 from ..core import RngHub
 from ..core.calendar import Calendar
 from ..latent import DriverPanel
-from ._util import USAGE_HOUR_WEIGHTS, intraday_seconds, sample_labels, timestamps_from_days
+from ._util import (
+    USAGE_HOUR_WEIGHTS,
+    active_day_mask,
+    events_on_active_days,
+    intraday_seconds,
+    sample_labels,
+    timestamps_from_days,
+)
 from .plans import PlanIndex
+
+# Cap on the user-days materialized at once. A multi-year scenario has tens of
+# millions of segment-days; chunking keeps peak memory flat without giving up
+# vectorization (each chunk is still one numpy pass).
+_CHUNK_USER_DAYS = 4_000_000
 
 
 def build_usage(
@@ -142,48 +168,66 @@ def build_usage(
 
 
 def _events_for_plan(cfg, cal, gen, panel, plan, su, ss, se, frailty, country, device, paid=False):
-    weekend = np.isin(cal.dow, [5, 6])
-    lam = panel.get(f"dau_over_active.{plan}") * panel.get(f"events_per_active_day.{plan}")
-    lam = lam * np.where(weekend, cfg.engagement.weekend_uplift, 1.0)
+    """One plan's segments -> product events, gated on a Bernoulli active day."""
+    eng = cfg.engagement
+    weekend = np.where(np.isin(cal.dow, [5, 6]), eng.weekend_uplift, 1.0)
+    day_rate = panel.get(f"dau_over_active.{plan}") * weekend
     if paid:
-        # Paid-tier usage rides the shared member_engagement driver — the same
-        # one that (inversely) scales churn hazard in lifecycle.py, which is
-        # what makes the member-activity -> churn edge learnable weekly.
-        lam = lam * panel.get("member_engagement")
+        # Paid-tier activity rides the shared member_engagement driver — the same
+        # one that (inversely) scales churn hazard in lifecycle.py, which is what
+        # makes the member-activity -> churn edge learnable weekly. It moves the
+        # active *share* now, so the weekly metric tracks it linearly instead of
+        # through the saturated tail of a Poisson intensity.
+        day_rate = day_rate * panel.get("member_engagement")
+    epd = panel.get(f"events_per_active_day.{plan}")
 
-    # prefix integral P[d] = sum(lam[:d]); length n_days + 1
-    prefix = np.concatenate([[0.0], np.cumsum(lam)])
-    seg_sum = prefix[se] - prefix[ss]
-    expected = frailty[su] * seg_sum
-    n_ev = gen.poisson(np.maximum(expected, 0.0))
-    total = int(n_ev.sum())
-    if total == 0:
+    feats = list(eng.feature_mix)
+    fp = list(eng.feature_mix.values())
+
+    seg_len = (se - ss).astype(np.int64)
+    offset = np.concatenate([[0], np.cumsum(seg_len)])  # flat start index per segment
+    n_seg = len(su)
+
+    parts: list[pd.DataFrame] = []
+    lo = 0
+    while lo < n_seg:
+        hi = int(np.searchsorted(offset, offset[lo] + _CHUNK_USER_DAYS, side="right")) - 1
+        hi = min(max(hi, lo + 1), n_seg)
+
+        sl = seg_len[lo:hi]
+        n_cells = int(sl.sum())
+        cell_seg = np.repeat(np.arange(lo, hi, dtype=np.int64), sl)
+        # ragged arange: position within each segment, then its calendar day
+        within = np.arange(n_cells, dtype=np.int64) - np.repeat(offset[lo:hi] - offset[lo], sl)
+        cell_day = ss[cell_seg] + within
+
+        active = active_day_mask(gen, day_rate[cell_day] * frailty[su[cell_seg]])
+        counts = events_on_active_days(gen, active, epd[cell_day])
+        lo = hi
+
+        total = int(counts.sum())
+        if total == 0:
+            continue
+        ev_cell = np.repeat(np.arange(n_cells, dtype=np.int64), counts)
+        ev_day = cell_day[ev_cell]
+        u = su[cell_seg[ev_cell]]
+        sec = intraday_seconds(gen, ev_day, USAGE_HOUR_WEIGHTS)
+        parts.append(
+            pd.DataFrame(
+                {
+                    "user_id": (u + 1).astype(np.int64),
+                    "event_name": sample_labels(gen, feats, fp, total),
+                    "plan_at_event": plan,
+                    "country": country[u],
+                    "device": device[u],
+                    "occurred_at": timestamps_from_days(cal.start, ev_day, sec),
+                }
+            )
+        )
+
+    if not parts:
         return None
-
-    ev_seg = np.repeat(np.arange(len(su)), n_ev)
-    # inverse-CDF day placement weighted by lam within each segment
-    lo = prefix[ss][ev_seg]
-    span = seg_sum[ev_seg]
-    target = lo + gen.random(total) * span
-    day = np.searchsorted(prefix, target, side="right") - 1
-    day = np.clip(day, ss[ev_seg], se[ev_seg] - 1)
-
-    sec = intraday_seconds(gen, day, USAGE_HOUR_WEIGHTS)
-    occurred = timestamps_from_days(cal.start, day, sec)
-    u = su[ev_seg]
-    feats = list(cfg.engagement.feature_mix)
-    fp = list(cfg.engagement.feature_mix.values())
-
-    return pd.DataFrame(
-        {
-            "user_id": (u + 1).astype(np.int64),
-            "event_name": sample_labels(gen, feats, fp, total),
-            "plan_at_event": plan,
-            "country": country[u],
-            "device": device[u],
-            "occurred_at": occurred,
-        }
-    )
+    return parts[0] if len(parts) == 1 else pd.concat(parts, ignore_index=True)
 
 
 def _frailty(gen: np.random.Generator, n: int, sigma: float) -> np.ndarray:
