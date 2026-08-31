@@ -50,10 +50,30 @@ determinism tests catch regressions). Do it incrementally — one module per PR.
 
 ## 2. Vertical split — simulate other kinds of business
 
-> **Status (2026-08): in progress.** The core extraction landed (`verticals/` package,
-> `Vertical` protocol, `company.vertical` config field, per-vertical dbt projects under
-> `dbt/<vertical>/`), byte-identical for the existing B2C SaaS configs. The retail_dtc
-> vertical is being built against it.
+> **Status (2026-08): done for the first two verticals.** The core extraction landed
+> (`verticals/` package, `Vertical` protocol, `company.vertical` config field,
+> per-vertical dbt projects under `dbt/<vertical>/`), byte-identical for the existing
+> B2C SaaS configs, and `retail_dtc` shipped against it (Alpenglow Supply Co. —
+> orders/baskets/shipments/returns/payments, own dbt + MetricFlow project, consumer
+> contracts verified). `tests/test_vertical_conformance.py` keeps every vertical's
+> tables/drivers/dq/metrics registries consistent.
+>
+> Deferred to retail v2: inventory/stockouts (approximate with a `category_demand`
+> drop for now) and promo tables (promos are config-only order stamps).
+>
+> Next verticals (sketches vetted against the protocol; no core changes expected):
+> - **b2b_services** (non-SaaS, sales-led): crm.accounts/contacts/deals/
+>   deal_stage_events + billing.contracts/invoices/payments; drivers
+>   `leads.<source>`, `stage_conversion.<stage>`, `deal_size`, `win_rate`,
+>   `cycle_time_scale`; metrics pipeline_value, win_rate, cycle_time, bookings,
+>   invoiced_revenue. No web/traffic sections (they're vertical-owned, so simply
+>   omitted). The deal-stage machine reuses the monthly-hazard pattern.
+> - **cpg_wholesale** (Traditional-Medicinals-flavored): erp.accounts/shipments +
+>   pos.scan_sales (weekly grain — `weekly` loading cadence already in the enum) +
+>   promo.trade_promotions; ad_spend present but causally decoupled
+>   (`affected_metrics("spend.<ch>") == ["marketing_spend"]` only). Promo -> POS
+>   lift -> delayed distributor reorders is the same delayed-event pattern as
+>   retail returns.
 
 **Why.** The generator is a *B2C-SaaS* generator wearing a config. E-commerce
 (carts/orders/SKUs, no subscriptions) or B2B SaaS (accounts/seats, sales-led,
