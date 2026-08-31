@@ -104,8 +104,8 @@ def test_ground_truth_emitted_for_each_rate_event(smoke_cfg):
         assert rec.affected_metrics  # every event names its expected downstream metrics
 
 
-def test_segmented_event_leaves_topline_clean(acme_config_path):
-    cfg = load_config(acme_config_path)
+def test_segmented_event_leaves_topline_clean(reference_config_path):
+    cfg = load_config(reference_config_path)
     cal = build_calendar(cfg)
     rng = RngHub(cfg.seed)
     resolved = resolve_anomalies(cfg, cal, rng, VERTICAL)

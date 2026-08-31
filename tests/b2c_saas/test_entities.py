@@ -97,7 +97,7 @@ def test_users_reference_valid_sessions(built):
 def test_plan_index_monthly_price():
     from fake_companies.config import load_config
 
-    cfg = load_config("configs/acme_b2c_saas.yaml")
+    cfg = load_config("configs/reference_b2c_saas.yaml")
     idx = build_plan_index(cfg)
     annual_pro = idx.id_for("pro", "annual")
     # annual pro is 490/yr -> ~40.83/mo MRR contribution

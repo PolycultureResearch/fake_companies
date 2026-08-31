@@ -18,7 +18,7 @@ driver names, and metric names.
   Breakdown RCA, a plain fixture, or a blind detector test.
 - **What should be in the data?** A specific anomaly (revenue drop, pipeline
   outage, segmented regression), or just a healthy baseline?
-- **Scale / speed?** Fast iteration → 90-day smoke; realistic demo → 2-year acme.
+- **Scale / speed?** Fast iteration → 90-day smoke; realistic demo → the 2-year white_cube scenario.
 - **Known or blind?** Blind test → use `anomalies.surprise` and don't read
   `ground_truth.json` until scoring.
 
@@ -31,7 +31,7 @@ uv sync                       # add --extra dbt if KPI metrics are needed (step 
 
 ## 3. Pick or author a scenario
 
-- Baseline only, fast → `configs/smoke_90d.yaml`. Realistic → `configs/acme_b2c_saas.yaml`.
+- Baseline only, fast → `configs/smoke_90d.yaml`. Realistic → `configs/white_cube_b2c_app.yaml`.
 - Custom → **copy** a config and edit the copy; add anomaly blocks from the
   recipes in `docs/using.md`. Common ones:
   - revenue drop → `rate` `level_shift` on `spend.<channel>` or `churn.<plan>`
@@ -67,9 +67,9 @@ Tremor **dataflow** mode needs no dbt — it profiles the raw tables directly
 
 ## 5. Point the consumer at it
 
-- **Breakdown:** use `examples/breakdown_acme_tree.yml` (a metric tree over the
+- **Breakdown:** use `examples/breakdown_white_cube_tree.yml` (a metric tree over the
   semantic layer); its `LocalDataFetcher` runs the `mf query` above.
-- **Tremor:** use `examples/tremor_acme.yaml` (KPI + dataflow monitors).
+- **Tremor:** use `examples/tremor_white_cube.yaml` (KPI + dataflow monitors).
 - Sanity-check both contracts at once:
   `FAKE_DB=out/company.duckdb uv run python scripts/verify_consumers.py`.
 

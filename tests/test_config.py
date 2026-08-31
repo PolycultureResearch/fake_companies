@@ -9,9 +9,9 @@ from fake_companies.config import config_hash, load_config
 from fake_companies.verticals.b2c_saas.config import B2CSaaSScenarioConfig
 
 
-def test_canonical_config_loads(acme_config_path):
-    cfg = load_config(acme_config_path)
-    assert cfg.company.slug == "acme"
+def test_canonical_config_loads(reference_config_path):
+    cfg = load_config(reference_config_path)
+    assert cfg.company.slug == "b2c_reference"
     assert cfg.timeline.n_days == 730
     assert cfg.timeline.end_date == dt.date(2025, 12, 30)
     assert len(cfg.weekly_shape) == 7

@@ -13,16 +13,16 @@ scale) and inject anomalies; the generator produces deterministic raw data plus
 ```bash
 uv sync
 # generate from an existing scenario
-uv run fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb
-uv run fake-companies truth --db out/acme.duckdb          # what anomalies were injected
+uv run fake-companies generate --config configs/white_cube_b2c_app.yaml --out out/white_cube.duckdb
+uv run fake-companies truth --db out/white_cube.duckdb          # what anomalies were injected
 ```
 
-- `configs/acme_b2c_saas.yaml` — canonical 2-year B2C SaaS company (~1.3M sessions,
+- `configs/reference_b2c_saas.yaml` — canonical 2-year B2C SaaS reference scenario (~1.3M sessions,
   ~50k users, ~7.5M product events). Full run ≈ 20s.
 - `configs/smoke_90d.yaml` — 90 days, small, seconds to run. Use for fast loops/CI.
 
 To iterate on your own scenario, **copy** a config and edit the copy:
-`cp configs/acme_b2c_saas.yaml configs/my_scenario.yaml`.
+`cp configs/reference_b2c_saas.yaml configs/my_scenario.yaml`.
 
 ## Recipes
 
@@ -147,14 +147,14 @@ Don't open `ground_truth.json` until after scoring.
 - **Breakdown / Tremor KPI mode** need modeled daily metrics. Build the dbt project:
   ```bash
   uv sync --extra dbt
-  export DBT_PROFILES_DIR=$PWD/dbt FAKE_DB=$PWD/out/acme.duckdb
+  export DBT_PROFILES_DIR=$PWD/dbt/b2c_saas FAKE_DB=$PWD/out/white_cube.duckdb
   uv run dbt build --project-dir dbt
   uv run mf query --metrics mrr --group-by metric_time__day --csv /tmp/mrr.csv   # in dbt/
   ```
-  `examples/breakdown_acme_tree.yml` is a ready metric tree. `scripts/verify_consumers.py`
+  `examples/breakdown_white_cube_tree.yml` is a ready metric tree. `scripts/verify_consumers.py`
   checks every tree metric + Tremor table against a built db.
 - **Tremor dataflow mode** profiles the raw tables directly (needs `event_time` +
-  `_loaded_at`). See `examples/tremor_acme.yaml`.
+  `_loaded_at`). See `examples/tremor_white_cube.yaml`.
 
 ## Reference
 

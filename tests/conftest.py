@@ -14,8 +14,8 @@ def smoke_config_path() -> Path:
 
 
 @pytest.fixture(scope="session")
-def acme_config_path() -> Path:
-    return CONFIGS / "acme_b2c_saas.yaml"
+def reference_config_path() -> Path:
+    return CONFIGS / "reference_b2c_saas.yaml"
 
 
 @pytest.fixture
