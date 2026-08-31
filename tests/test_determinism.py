@@ -21,7 +21,7 @@ def _sha(path) -> str:
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("config_name", ["smoke_90d", "smoke_retail_90d"])
+@pytest.mark.parametrize("config_name", ["smoke_90d", "smoke_retail_90d", "smoke_b2b_90d"])
 def test_parquet_byte_identical(config_name, tmp_path):
     cfg = load_config(REPO_ROOT / "configs" / f"{config_name}.yaml")
 

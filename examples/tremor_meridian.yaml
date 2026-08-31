@@ -1,0 +1,108 @@
+# Tremor monitor config for the Meridian (b2b_services) scenario.
+#
+# Tremor is early-stage/volatile, so this stays example-level and builds only on
+# the stable contract: (a) daily MetricFlow KPIs and (b) raw warehouse tables
+# with event-time + `_loaded_at` columns.
+#
+# Point connections at a generated database:
+#   fake-companies generate --config configs/meridian_b2b_services.yaml --out out/meridian.duckdb
+#   cd dbt/b2b_services && FAKE_DB=../../out/meridian.duckdb dbt build
+connections:
+  warehouse:
+    dialect: duckdb
+    dsn: "${FAKE_DB:-out/meridian.duckdb}"
+  metricflow:
+    mode: cli
+    project_dir: "./dbt/b2b_services"
+
+schedule:
+  cron: "0 6 * * *"
+
+defaults:
+  dataflow:
+    grain: hour
+    training_window_days: 30
+    max_lateness: "2h"
+    threshold_sigma: 3.5
+    min_effect_pct: 5.0
+    cooldown_hours: 6
+    detectors: [robust_z, changepoint]
+  kpi:
+    grain: day
+    training_window_days: 90
+    max_lateness: "1d"
+    seasonality: weekly
+    target_risk: 1.0e-4
+    threshold_sigma: 3.0
+    min_effect_pct: 5.0
+    min_effect_abs: 0.02
+    cooldown_hours: 24
+    detectors: auto
+
+monitors:
+  # --- KPI monitors (daily MetricFlow series) --------------------------------
+  - mode: kpi
+    metric: leads
+    source: metricflow
+  - mode: kpi
+    metric: bookings
+    source: metricflow
+  - mode: kpi
+    metric: win_rate
+    source: metricflow
+    min_effect_abs: 0.01
+  - mode: kpi
+    metric: open_pipeline_value
+    source: metricflow
+
+  # --- Dataflow monitors (raw tables; event_time + _loaded_at) ---------------
+  - mode: dataflow
+    name: crm.deals
+    connection: warehouse
+    relation: crm.deals
+    event_time_column: created_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "3h"
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [deal_id]
+    signals:
+      - { type: volume }
+      - { type: null_rate, columns: [closed_at] } # catches deals_closed_at_nulls
+      - { type: distribution, column: source, method: psi }
+      - { type: numeric_distribution, column: amount, method: quantiles }
+
+  - mode: dataflow
+    name: crm.deal_stage_events
+    connection: warehouse
+    relation: crm.deal_stage_events
+    event_time_column: occurred_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "3h"
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [event_id] # catches stage_events_dupes (duplicate_rows)
+    signals:
+      - { type: volume }
+      - { type: distribution, column: stage, method: psi }
+
+  - mode: dataflow
+    name: billing.invoices
+    connection: warehouse
+    relation: billing.invoices
+    event_time_column: issued_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "30h" # daily batch; catches invoices_loading_delay
+      row_floor: 0
+      schema_hash: true
+      pk_unique: [invoice_id]
+    signals:
+      - { type: volume }
+      - { type: distribution, column: kind, method: psi }
+      - { type: numeric_distribution, column: amount, method: quantiles }
