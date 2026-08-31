@@ -1,0 +1,10 @@
+fake_companies_b2b:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('FAKE_DB', '../../out/meridian.duckdb') }}"
+      threads: 4
+      # Raw schemas (crm, billing, meta) already live inside the same DuckDB
+      # file the generator wrote. dbt materializes its own models into
+      # main / main_staging / main_marts.

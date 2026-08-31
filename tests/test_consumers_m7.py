@@ -27,7 +27,11 @@ _available = importlib.util.find_spec("dbt") is not None and MF.exists() and DBT
 @pytest.mark.skipif(not _available, reason="dbt extra / mf not installed")
 @pytest.mark.parametrize(
     ("config_name", "vertical"),
-    [("smoke_90d", "b2c_saas"), ("smoke_retail_90d", "retail_dtc")],
+    [
+        ("smoke_90d", "b2c_saas"),
+        ("smoke_retail_90d", "retail_dtc"),
+        ("smoke_b2b_90d", "b2b_services"),
+    ],
 )
 def test_consumer_contracts(config_name, vertical, tmp_path):
     db = tmp_path / "consumers.duckdb"

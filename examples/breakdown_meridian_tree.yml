@@ -1,0 +1,79 @@
+# Breakdown metric tree for the Meridian (b2b_services) scenario.
+#
+# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
+#   mf query --metrics <name> --group-by metric_time__day --csv
+# run inside the B2B dbt project (`provider.project_path`). The tree encodes
+# the pipeline funnel so Breakdown's Bayesian RCA can attribute a bookings
+# movement to its stage: an SDR-team lead drought starves every stage, a
+# healthcare proposal stall dents proposals -> wins with the pipeline lag, and
+# discounting creep cuts bookings without touching win counts.
+provider:
+  type: local
+  project_path: "../dbt/b2b_services" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+
+metrics:
+  - name: leads
+    description: Deals created across lead sources.
+    seasonality:
+      - { period: 7, name: weekly }
+
+  - name: qualified_deals
+    description: Deals passing the lead gate into qualified.
+    parents: [leads]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.48, sigma: 0.08 } # lead -> qualified rate
+    seasonality:
+      - { period: 7, name: weekly }
+
+  - name: proposals_sent
+    description: Qualified deals reaching proposal.
+    parents: [qualified_deals]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.55, sigma: 0.08 }
+
+  - name: negotiations
+    description: Proposals advancing to negotiation.
+    parents: [proposals_sent]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.50, sigma: 0.08 }
+
+  - name: deals_won
+    description: Negotiations closing won.
+    parents: [negotiations]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.62, sigma: 0.08 }
+
+  - name: avg_deal_size
+    description: Average closed-won deal value.
+    seasonality:
+      - { period: 7, name: weekly }
+
+  # Value identity: bookings = wins x average deal size (deterministic node).
+  - name: bookings
+    description: Closed-won value.
+    parents: [deals_won, avg_deal_size]
+    formula: "deals_won * avg_deal_size"
+
+  - name: invoiced_revenue
+    description: Invoice value issued (upfront at signing + balance at delivery).
+    parents: [bookings]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.9, sigma: 0.2 } # bookings -> invoicing with delivery lag
+
+  - name: collected_cash
+    description: Payments received (net-30 with a late tail).
+    parents: [invoiced_revenue]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.95, sigma: 0.1 }

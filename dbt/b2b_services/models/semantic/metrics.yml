@@ -1,0 +1,140 @@
+version: 2
+
+metrics:
+
+  # --- Funnel throughput ---------------------------------------------------
+  - name: leads
+    description: Deals created (every lead opens a deal).
+    type: simple
+    label: Leads
+    type_params:
+      measure:
+        name: leads
+        fill_nulls_with: 0
+
+  - name: qualified_deals
+    description: Deals entering the qualified stage.
+    type: simple
+    label: Qualified Deals
+    type_params:
+      measure:
+        name: qualified_deals
+        fill_nulls_with: 0
+
+  - name: proposals_sent
+    description: Deals entering the proposal stage.
+    type: simple
+    label: Proposals Sent
+    type_params:
+      measure:
+        name: proposals_sent
+        fill_nulls_with: 0
+
+  - name: negotiations
+    description: Deals entering the negotiation stage.
+    type: simple
+    label: Negotiations
+    type_params:
+      measure:
+        name: negotiations
+        fill_nulls_with: 0
+
+  - name: deals_won
+    description: Deals closed won, by close date.
+    type: simple
+    label: Deals Won
+    type_params:
+      measure:
+        name: deals_won
+        fill_nulls_with: 0
+
+  - name: deals_lost
+    description: Deals closed lost, by close date.
+    type: simple
+    label: Deals Lost
+    type_params:
+      measure:
+        name: deals_lost
+        fill_nulls_with: 0
+
+  - name: closed_deals
+    description: Deals closed either way (win-rate denominator).
+    type: simple
+    label: Closed Deals
+    type_params:
+      measure:
+        name: closed_deals
+        fill_nulls_with: 0
+
+  - name: win_rate
+    description: Share of closed deals that were won. Wins take longer to close
+      than losses, so day-level values lag stage-gate changes — read over windows.
+    type: ratio
+    label: Win Rate
+    type_params:
+      numerator: deals_won
+      denominator: closed_deals
+
+  # --- Value ---------------------------------------------------------------
+  - name: bookings
+    description: Value of closed-won deals, by close date.
+    type: simple
+    label: Bookings
+    type_params:
+      measure:
+        name: bookings
+        fill_nulls_with: 0
+
+  - name: avg_deal_size
+    description: Average closed-won deal value.
+    type: ratio
+    label: Avg Deal Size
+    type_params:
+      numerator: bookings
+      denominator: deals_won
+
+  - name: sales_cycle_days
+    description: Mean days from deal creation to closed-won, by close date.
+    type: simple
+    label: Sales Cycle Days
+    type_params:
+      measure:
+        name: cycle_days_measure
+
+  # --- Pipeline snapshot ---------------------------------------------------
+  - name: open_deals
+    description: Deals open on the day (daily snapshot).
+    type: simple
+    label: Open Deals
+    type_params:
+      measure:
+        name: open_deals
+        fill_nulls_with: 0
+
+  - name: open_pipeline_value
+    description: Value of deals open on the day (daily snapshot).
+    type: simple
+    label: Open Pipeline Value
+    type_params:
+      measure:
+        name: open_pipeline_value
+        fill_nulls_with: 0
+
+  # --- Billing -------------------------------------------------------------
+  - name: invoiced_revenue
+    description: Invoice value issued (upfront at signing, balance at delivery).
+    type: simple
+    label: Invoiced Revenue
+    type_params:
+      measure:
+        name: invoiced_revenue
+        fill_nulls_with: 0
+
+  - name: collected_cash
+    description: Payments received.
+    type: simple
+    label: Collected Cash
+    type_params:
+      measure:
+        name: collected_cash
+        fill_nulls_with: 0

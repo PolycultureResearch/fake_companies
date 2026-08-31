@@ -1,0 +1,57 @@
+version: 2
+
+sources:
+  - name: crm
+    schema: crm
+    tables:
+      - name: accounts
+        loaded_at_field: _loaded_at
+        columns:
+          - name: account_id
+            tests: [not_null]
+      - name: contacts
+        loaded_at_field: _loaded_at
+        columns:
+          - name: contact_id
+            tests: [not_null]
+      - name: deals
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: deal_id
+            tests: [not_null]
+      - name: deal_stage_events
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: event_id
+            tests: [not_null]
+
+  - name: billing
+    schema: billing
+    tables:
+      - name: contracts
+        loaded_at_field: _loaded_at
+        columns:
+          - name: contract_id
+            tests: [not_null]
+      - name: invoices
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 96, period: hour }
+          error_after: { count: 240, period: hour }
+        columns:
+          - name: invoice_id
+            tests: [not_null]
+      - name: payments
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 96, period: hour }
+          error_after: { count: 240, period: hour }
+        columns:
+          - name: payment_id
+            tests: [not_null]

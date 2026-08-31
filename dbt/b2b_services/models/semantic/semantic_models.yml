@@ -1,0 +1,214 @@
+version: 2
+
+semantic_models:
+
+  # ----------------------------------------------------------------------- #
+  # Deals (creation grain — the lead funnel's front door)
+  # ----------------------------------------------------------------------- #
+  - name: deals
+    description: Deals, one row per deal, bucketed by creation date.
+    model: ref('fct_deals')
+    defaults:
+      agg_time_dimension: created_date
+    entities:
+      - name: deal
+        type: primary
+        expr: deal_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: source
+        type: categorical
+      - name: industry
+        type: categorical
+      - name: size_tier
+        type: categorical
+      - name: region
+        type: categorical
+      - name: stage
+        type: categorical
+    measures:
+      - name: leads
+        description: Deals created (every lead opens a deal).
+        agg: sum
+        expr: 1
+
+  # ----------------------------------------------------------------------- #
+  # Won deals (close grain — bookings and cycle time)
+  # ----------------------------------------------------------------------- #
+  - name: won_deals
+    description: Closed-won deals, bucketed by close date.
+    model: ref('fct_won_deals')
+    defaults:
+      agg_time_dimension: closed_date
+    entities:
+      - name: won_deal
+        type: primary
+        expr: deal_id
+    dimensions:
+      - name: closed_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: source
+        type: categorical
+      - name: industry
+        type: categorical
+      - name: size_tier
+        type: categorical
+    measures:
+      - name: deals_won
+        description: Deals closed won.
+        agg: sum
+        expr: 1
+      - name: bookings
+        description: Value of closed-won deals.
+        agg: sum
+        expr: amount
+      - name: cycle_days_measure
+        description: Mean days from deal creation to close (won deals).
+        agg: average
+        expr: cycle_days
+
+  # ----------------------------------------------------------------------- #
+  # Stage events (funnel throughput)
+  # ----------------------------------------------------------------------- #
+  - name: stage_events
+    description: Stage transitions, one row per stage entered.
+    model: ref('fct_stage_events')
+    defaults:
+      agg_time_dimension: occurred_date
+    entities:
+      - name: stage_event
+        type: primary
+        expr: event_id
+      - name: deal
+        type: foreign
+        expr: deal_id
+    dimensions:
+      - name: occurred_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: stage
+        type: categorical
+      - name: source
+        type: categorical
+      - name: industry
+        type: categorical
+      - name: size_tier
+        type: categorical
+    measures:
+      - name: qualified_deals
+        description: Deals entering the qualified stage.
+        agg: sum
+        expr: case when stage = 'qualified' then 1 else 0 end
+      - name: proposals_sent
+        description: Deals entering the proposal stage.
+        agg: sum
+        expr: case when stage = 'proposal' then 1 else 0 end
+      - name: negotiations
+        description: Deals entering the negotiation stage.
+        agg: sum
+        expr: case when stage = 'negotiation' then 1 else 0 end
+      - name: deals_lost
+        description: Deals closed lost.
+        agg: sum
+        expr: case when stage = 'closed_lost' then 1 else 0 end
+      - name: closed_deals
+        description: Deals closed either way (win-rate denominator).
+        agg: sum
+        expr: case when stage in ('closed_won', 'closed_lost') then 1 else 0 end
+
+  # ----------------------------------------------------------------------- #
+  # Open pipeline (daily snapshot grid)
+  # ----------------------------------------------------------------------- #
+  - name: deal_days
+    description: Daily open-pipeline grid (one row per deal per open day).
+    model: ref('fct_deal_days')
+    defaults:
+      agg_time_dimension: date_day
+    entities:
+      - name: deal_day
+        type: primary
+        expr: deal_id || '-' || date_day
+    dimensions:
+      - name: date_day
+        type: time
+        type_params:
+          time_granularity: day
+      - name: source
+        type: categorical
+      - name: industry
+        type: categorical
+      - name: size_tier
+        type: categorical
+    measures:
+      - name: open_deals
+        description: Deals open on the day.
+        agg: sum
+        expr: 1
+      - name: open_pipeline_value
+        description: Value of deals open on the day.
+        agg: sum
+        expr: amount
+
+  # ----------------------------------------------------------------------- #
+  # Billing
+  # ----------------------------------------------------------------------- #
+  - name: invoices
+    description: Invoices, one row per invoice, bucketed by issue date.
+    model: ref('fct_invoices')
+    defaults:
+      agg_time_dimension: issued_date
+    entities:
+      - name: invoice
+        type: primary
+        expr: invoice_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: issued_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: kind
+        type: categorical
+      - name: status
+        type: categorical
+    measures:
+      - name: invoiced_revenue
+        description: Invoice value issued.
+        agg: sum
+        expr: amount
+
+  - name: payments
+    description: Payments, one row per payment, bucketed by paid date.
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: paid_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: account
+        type: foreign
+        expr: account_id
+    dimensions:
+      - name: paid_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: method
+        type: categorical
+    measures:
+      - name: collected_cash
+        description: Payments received.
+        agg: sum
+        expr: amount

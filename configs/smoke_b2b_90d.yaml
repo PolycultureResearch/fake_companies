@@ -1,0 +1,88 @@
+# Small 90-day B2B scenario for CI / quick test loops. Same shape as
+# meridian_b2b_services, smaller scale and a faster pipeline so enough deals
+# close inside the window.
+company:
+  name: B2B Smoke
+  slug: b2b_smoke
+  vertical: b2b_services
+  currency: USD
+  industry: b2b_services
+
+seed: 23
+
+timeline:
+  start: 2024-01-01
+  days: 90
+
+calendar:
+  holiday_country: US
+  holiday_effect: 0.3
+  annual_amp: 0.05
+  annual_peak_doy: 60
+
+# Sales activity is weekday-heavy; weekends near-dead.
+weekly_shape: [1.18, 1.22, 1.22, 1.16, 1.02, 0.10, 0.10]
+
+noise:
+  day_sigma: 0.08
+  ar1: 0.3
+
+leads:
+  existing_account_rate: 0.15
+  sources:
+    outbound:
+      baseline: 12
+      growth: { kind: flat }
+    referral:
+      baseline: 5
+      growth: { kind: flat }
+    website:
+      baseline: 8
+      growth: { kind: linear, rate: 0.002 }
+
+accounts:
+  industry_mix: { manufacturing: 0.30, healthcare: 0.25, logistics: 0.20, finance: 0.15, retail: 0.10 }
+  size_tier_mix: { smb: 0.45, mid_market: 0.40, enterprise: 0.15 }
+  region_mix: { northeast: 0.30, midwest: 0.25, south: 0.25, west: 0.20 }
+
+pipeline:
+  stages:
+    - { name: lead, advance_rate: 0.50, duration_days_mean: 3, duration_sigma: 0.5 }
+    - { name: qualified, advance_rate: 0.55, duration_days_mean: 6, duration_sigma: 0.6 }
+    - { name: proposal, advance_rate: 0.50, duration_days_mean: 8, duration_sigma: 0.6 }
+    - { name: negotiation, advance_rate: 0.62, duration_days_mean: 6, duration_sigma: 0.6 }
+
+deals:
+  amount_mean: 35000
+  amount_sigma: 0.7
+  size_tier_multipliers: { smb: 0.35, mid_market: 1.0, enterprise: 3.2 }
+
+contracts:
+  upfront_share: 0.4
+  delivery_days_mean: 30
+  delivery_sigma: 0.4
+  net_days: 30
+  late_rate: 0.25
+  late_days_mean: 15
+  late_sigma: 0.6
+
+loading:
+  sources:
+    crm: { cadence: micro_batch, batch_minutes: 60, lag_median_minutes: 10, lag_sigma: 0.4 }
+    billing: { cadence: daily, lag_median_minutes: 240, lag_sigma: 0.3 }
+
+anomalies:
+  scripted:
+    # Smoke anomalies run hotter than the demo config for honesty-test power.
+    - name: outbound_team_turnover
+      kind: rate
+      type: level_shift
+      target: leads.outbound
+      window: { start: 2024-02-05, end: 2024-02-18 }
+      magnitude: 0.4
+    - name: deals_pipeline_dupes
+      kind: dq
+      type: duplicate_rows
+      target: crm.deals
+      window: { start: 2024-03-11, end: 2024-03-12 }
+      magnitude: 0.9

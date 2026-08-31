@@ -1,0 +1,139 @@
+# Meridian Partners — B2B professional-services firm (b2b_services demo
+# scenario). Two years of a sales-led pipeline; four scripted rate anomalies
+# with clean demo stories, three dq events, and two surprises.
+#
+# Demo stories:
+#   1. outbound_team_turnover  — half the SDR team churns: outbound leads drop 45%
+#                                for 4 weeks, starving every downstream stage
+#   2. healthcare_proposal_stall — a compliance-review change stalls healthcare
+#                                proposals for 6 weeks (segmented; other industries clean)
+#   3. discounting_creep        — end-of-year discounting cuts deal sizes 20% for 8 weeks
+#   4. legal_backlog            — contract review backlog stretches every stage 60%
+#                                for 6 weeks (cycle time up, bookings pushed out)
+company:
+  name: Meridian Partners
+  slug: meridian
+  vertical: b2b_services
+  currency: USD
+  industry: b2b_services
+
+seed: 137
+
+timeline:
+  start: 2024-03-01
+  days: 730
+
+calendar:
+  holiday_country: US
+  holiday_effect: 0.3
+  annual_amp: 0.06
+  annual_peak_doy: 75  # spring selling season peak
+
+weekly_shape: [1.18, 1.22, 1.22, 1.16, 1.02, 0.10, 0.10]
+
+noise:
+  day_sigma: 0.08
+  ar1: 0.35
+
+leads:
+  existing_account_rate: 0.18
+  sources:
+    outbound:
+      baseline: 14
+      growth: { kind: linear, rate: 0.0008 }
+    referral:
+      baseline: 6
+      growth: { kind: linear, rate: 0.0012 }
+    events:
+      baseline: 4
+      growth: { kind: flat }
+    website:
+      baseline: 10
+      growth: { kind: linear, rate: 0.0015 }
+
+accounts:
+  industry_mix: { manufacturing: 0.28, healthcare: 0.24, logistics: 0.18, finance: 0.18, retail: 0.12 }
+  size_tier_mix: { smb: 0.42, mid_market: 0.42, enterprise: 0.16 }
+  region_mix: { northeast: 0.30, midwest: 0.26, south: 0.24, west: 0.20 }
+
+pipeline:
+  stages:
+    - { name: lead, advance_rate: 0.48, duration_days_mean: 4, duration_sigma: 0.5 }
+    - { name: qualified, advance_rate: 0.55, duration_days_mean: 9, duration_sigma: 0.6 }
+    - { name: proposal, advance_rate: 0.50, duration_days_mean: 13, duration_sigma: 0.6 }
+    - { name: negotiation, advance_rate: 0.62, duration_days_mean: 10, duration_sigma: 0.6 }
+
+deals:
+  amount_mean: 42000
+  amount_sigma: 0.7
+  size_tier_multipliers: { smb: 0.35, mid_market: 1.0, enterprise: 3.2 }
+
+contracts:
+  upfront_share: 0.4
+  delivery_days_mean: 60
+  delivery_sigma: 0.4
+  net_days: 30
+  late_rate: 0.28
+  late_days_mean: 18
+  late_sigma: 0.6
+
+loading:
+  sources:
+    crm: { cadence: micro_batch, batch_minutes: 60, lag_median_minutes: 10, lag_sigma: 0.4 }
+    billing: { cadence: daily, lag_median_minutes: 240, lag_sigma: 0.3 }
+
+anomalies:
+  scripted:
+    - name: outbound_team_turnover
+      kind: rate
+      type: level_shift
+      target: leads.outbound
+      window: { start: 2024-09-09, end: 2024-10-06 }
+      magnitude: 0.55
+    - name: healthcare_proposal_stall
+      kind: rate
+      type: level_shift
+      target: stage_conversion.proposal
+      segment: { industry: healthcare }
+      window: { start: 2025-01-13, end: 2025-02-23 }
+      magnitude: 0.45
+    - name: discounting_creep
+      kind: rate
+      type: level_shift
+      target: deal_size
+      window: { start: 2024-11-11, end: 2025-01-05 }
+      magnitude: 0.8
+    - name: legal_backlog
+      kind: rate
+      type: level_shift
+      target: cycle_time_scale
+      window: { start: 2025-05-05, end: 2025-06-15 }
+      magnitude: 1.6
+    - name: stage_events_dupes
+      kind: dq
+      type: duplicate_rows
+      target: crm.deal_stage_events
+      window: { start: 2024-12-09, end: 2024-12-10 }
+      magnitude: 0.5
+    - name: invoices_loading_delay
+      kind: dq
+      type: loading_delay
+      target: billing.invoices
+      window: { start: 2025-03-24, end: 2025-03-25 }
+      magnitude: 8.0
+    - name: deals_closed_at_nulls
+      kind: dq
+      type: null_spike
+      target: crm.deals
+      window: { start: 2025-07-14, end: 2025-07-17 }
+      magnitude: 0.5
+      params: { column: closed_at }
+  surprise:
+    count: 2
+    kinds: [rate, dq]
+    # Transient types only (ramp/trend_change persist to the timeline end).
+    types: [spike, drop, level_shift, volume_dropout, null_spike, distribution_shift, loading_delay, duplicate_rows]
+    magnitude: { min: 0.5, max: 0.8 }
+    min_gap_days: 21
+    exclude_windows:
+      - { start: 2024-09-01, end: 2024-10-15 }  # keep the outbound story clean
