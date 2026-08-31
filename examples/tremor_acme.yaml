@@ -14,7 +14,7 @@ connections:
     dsn: "${FAKE_DB:-out/acme.duckdb}"
   metricflow:
     mode: cli
-    project_dir: "./dbt"
+    project_dir: "./dbt/b2c_saas"
 
 schedule:
   cron: "0 6 * * *"

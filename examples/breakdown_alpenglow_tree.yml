@@ -1,0 +1,90 @@
+# Breakdown metric tree for the Alpenglow (retail_dtc) scenario.
+#
+# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
+#   mf query --metrics <name> --group-by metric_time__day --csv
+# run inside the retail dbt project (`provider.project_path`). The tree encodes
+# the acquisition -> orders -> revenue chain plus the returns drag, so
+# Breakdown's Bayesian RCA can attribute a net-revenue movement back to its
+# driver (a paid-social budget cut cascading to sessions -> orders -> revenue,
+# a mobile checkout bug denting conversion, or a jackets sizing recall lifting
+# refunds weeks after the orders were placed).
+provider:
+  type: local
+  project_path: "../dbt/retail_dtc" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+
+metrics:
+  - name: marketing_spend
+    description: Paid acquisition spend across channels.
+    seasonality:
+      - { period: 7, name: weekly }
+      - { period: 365, name: annual }
+
+  - name: sessions
+    description: Web sessions (paid channels scale with spend).
+    parents: [marketing_spend]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 2.5, sigma: 0.6 } # ~sessions per $ of spend
+    seasonality:
+      - { period: 7, name: weekly }
+      - { period: 365, name: annual }
+
+  - name: orders
+    description: Orders placed (session conversion plus repeat purchases).
+    parents: [sessions]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.02, sigma: 0.006 } # site conversion rate
+    seasonality:
+      - { period: 7, name: weekly }
+
+  - name: new_customers
+    description: First orders (customer acquisition).
+    parents: [orders]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.45, sigma: 0.10 } # first-order share of orders
+
+  - name: units
+    description: Units sold across order lines.
+    parents: [orders]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 1.9, sigma: 0.3 } # units per order
+
+  - name: gross_revenue
+    description: Merchandise revenue before discounts and refunds.
+    parents: [orders]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 130.0, sigma: 25.0 } # ~AOV
+    seasonality:
+      - { period: 7, name: weekly }
+      - { period: 365, name: annual }
+
+  - name: discounts
+    description: Promo discounts given.
+    parents: [gross_revenue]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.03, sigma: 0.02 } # discount share of gross
+
+  - name: refunds
+    description: Refund value of returns (lags orders by delivery + request time).
+    parents: [gross_revenue]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.05, sigma: 0.02 } # refund share of gross
+
+  # Revenue identity: net = gross - discounts - refunds (deterministic node).
+  - name: net_revenue
+    description: Net merchandise revenue.
+    parents: [gross_revenue, discounts, refunds]
+    formula: "gross_revenue - discounts - refunds"

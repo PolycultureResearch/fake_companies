@@ -1,0 +1,128 @@
+# Tremor monitor config for the Alpenglow (retail_dtc) scenario.
+#
+# Tremor is early-stage/volatile, so this stays example-level and builds only on
+# the stable contract: (a) daily MetricFlow KPIs and (b) raw warehouse tables
+# with event-time + `_loaded_at` columns. KPI monitors profile the semantic
+# layer (Breakdown's fetch path); dataflow monitors profile raw tables directly.
+#
+# Point connections at a generated database:
+#   fake-companies generate --config configs/alpenglow_retail_dtc.yaml --out out/alpenglow.duckdb
+#   cd dbt/retail_dtc && FAKE_DB=../../out/alpenglow.duckdb dbt build
+connections:
+  warehouse:
+    dialect: duckdb
+    dsn: "${FAKE_DB:-out/alpenglow.duckdb}"
+  metricflow:
+    mode: cli
+    project_dir: "./dbt/retail_dtc"
+
+schedule:
+  cron: "0 6 * * *"
+
+defaults:
+  dataflow:
+    grain: hour
+    training_window_days: 30
+    max_lateness: "90m"
+    threshold_sigma: 3.5
+    min_effect_pct: 5.0
+    cooldown_hours: 6
+    detectors: [robust_z, changepoint]
+  kpi:
+    grain: day
+    training_window_days: 90
+    max_lateness: "1d"
+    seasonality: weekly
+    target_risk: 1.0e-4
+    threshold_sigma: 3.0
+    min_effect_pct: 5.0
+    min_effect_abs: 0.02
+    cooldown_hours: 24
+    detectors: auto
+
+monitors:
+  # --- KPI monitors (daily MetricFlow series) --------------------------------
+  - mode: kpi
+    metric: orders
+    source: metricflow
+  - mode: kpi
+    metric: net_revenue
+    source: metricflow
+  - mode: kpi
+    metric: conversion_rate
+    source: metricflow
+    min_effect_abs: 0.002
+  - mode: kpi
+    metric: return_rate
+    source: metricflow
+    min_effect_abs: 0.01
+
+  # --- Dataflow monitors (raw tables; event_time + _loaded_at) ---------------
+  - mode: dataflow
+    name: shop_db.orders
+    connection: warehouse
+    relation: shop_db.orders
+    event_time_column: placed_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "2h"
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [order_id] # catches orders_pipeline_dupes (duplicate_rows)
+    signals:
+      - { type: volume }
+      - { type: null_rate, columns: [session_id] } # catches orders_session_id_nulls
+      - { type: distribution, column: channel, method: psi }
+      - { type: numeric_distribution, column: total_amount, method: quantiles }
+
+  - mode: dataflow
+    name: shop_db.order_items
+    connection: warehouse
+    relation: shop_db.order_items
+    event_time_column: placed_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "2h"
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [order_item_id]
+    signals:
+      - { type: volume }
+      - { type: distribution, column: category, method: psi } # tees_demand_slump mix shift
+
+  - mode: dataflow
+    name: payments.transactions
+    connection: warehouse
+    relation: payments.transactions
+    event_time_column: created_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "2h" # catches payments_loading_delay (loading_delay)
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [payment_id]
+    signals:
+      - { type: volume }
+      - { type: null_rate, columns: [failure_code] }
+      - { type: distribution, column: payment_method, method: psi }
+      - { type: numeric_distribution, column: amount, method: quantiles }
+
+  - mode: dataflow
+    name: web.sessions
+    connection: warehouse
+    relation: web.sessions
+    event_time_column: started_at
+    loaded_at_column: _loaded_at
+    grain: hour
+    guards:
+      freshness_sla: "90m"
+      row_floor: 1
+      schema_hash: true
+      pk_unique: [session_id]
+    signals:
+      - { type: volume }
+      - { type: null_rate, columns: [user_id] }
+      - { type: distribution, column: device, method: psi }

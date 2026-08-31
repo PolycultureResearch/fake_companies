@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # vertical -> (breakdown tree, tremor config) under examples/
 EXAMPLES = {
     "b2c_saas": ("breakdown_acme_tree.yml", "tremor_acme.yaml"),
+    "retail_dtc": ("breakdown_alpenglow_tree.yml", "tremor_alpenglow.yaml"),
 }
 
 

@@ -1,0 +1,256 @@
+version: 2
+
+semantic_models:
+
+  # ----------------------------------------------------------------------- #
+  # Marketing & traffic
+  # ----------------------------------------------------------------------- #
+  - name: ad_spend
+    description: Daily ad-platform spend by channel.
+    model: ref('stg_ad_spend')
+    defaults:
+      agg_time_dimension: spend_date
+    entities:
+      - name: spend
+        type: primary
+        expr: spend_id
+    dimensions:
+      - name: spend_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: channel
+        type: categorical
+    measures:
+      - name: marketing_spend
+        description: Total ad spend.
+        agg: sum
+        expr: spend
+
+  - name: sessions
+    description: Web sessions (one row per session).
+    model: ref('fct_sessions')
+    defaults:
+      agg_time_dimension: session_date
+    entities:
+      - name: session
+        type: primary
+        expr: session_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: session_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: channel
+        type: categorical
+      - name: country
+        type: categorical
+      - name: device
+        type: categorical
+    measures:
+      - name: sessions
+        description: Count of web sessions.
+        agg: sum
+        expr: 1
+
+  # ----------------------------------------------------------------------- #
+  # Customers
+  # ----------------------------------------------------------------------- #
+  - name: customers
+    description: Shop customers (one row per customer; created at first order).
+    model: ref('dim_customers')
+    defaults:
+      agg_time_dimension: created_date
+    entities:
+      - name: customer
+        type: primary
+        expr: customer_id
+    dimensions:
+      - name: created_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: country
+        type: categorical
+      - name: first_channel
+        type: categorical
+      - name: first_device
+        type: categorical
+    measures:
+      - name: new_customers
+        description: Customers acquired (first orders placed).
+        agg: sum
+        expr: 1
+
+  # ----------------------------------------------------------------------- #
+  # Orders
+  # ----------------------------------------------------------------------- #
+  - name: orders
+    description: Orders (one row per order).
+    model: ref('fct_orders')
+    defaults:
+      agg_time_dimension: order_date
+    entities:
+      - name: order
+        type: primary
+        expr: order_id
+      - name: customer
+        type: foreign
+        expr: customer_id
+    dimensions:
+      - name: order_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: channel
+        type: categorical
+      - name: country
+        type: categorical
+      - name: device
+        type: categorical
+      - name: is_first_order
+        type: categorical
+      - name: fulfillment_status
+        type: categorical
+    measures:
+      - name: orders
+        description: Order count.
+        agg: sum
+        expr: 1
+      - name: session_orders
+        description: Orders attributed to a web session (conversion numerator).
+        agg: sum
+        expr: case when session_id is not null then 1 else 0 end
+      - name: returning_customer_orders
+        description: Orders from existing customers (repeat purchases).
+        agg: sum
+        expr: case when is_first_order then 0 else 1 end
+      - name: gross_revenue
+        description: Merchandise subtotal before discounts and refunds.
+        agg: sum
+        expr: gross_amount
+      - name: discounts
+        description: Order-level promo discounts.
+        agg: sum
+        expr: discount_amount
+      - name: shipping_revenue
+        description: Shipping fees charged.
+        agg: sum
+        expr: shipping_amount
+      - name: avg_fulfillment_days_measure
+        description: Mean days from order placement to delivery (delivered orders).
+        agg: average
+        expr: fulfillment_days
+
+  # ----------------------------------------------------------------------- #
+  # Order lines (units, category mix, margin)
+  # ----------------------------------------------------------------------- #
+  - name: order_items
+    description: Order line items with product cost.
+    model: ref('fct_order_items')
+    defaults:
+      agg_time_dimension: order_date
+    entities:
+      - name: order_item
+        type: primary
+        expr: order_item_id
+      - name: order
+        type: foreign
+        expr: order_id
+    dimensions:
+      - name: order_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: category
+        type: categorical
+    measures:
+      - name: units
+        description: Units sold.
+        agg: sum
+        expr: quantity
+      - name: line_revenue
+        description: Line revenue (quantity x unit price).
+        agg: sum
+        expr: line_amount
+      - name: gross_margin
+        description: Merchandise margin (line revenue - unit cost x quantity).
+        agg: sum
+        expr: margin_amount
+
+  # ----------------------------------------------------------------------- #
+  # Returns
+  # ----------------------------------------------------------------------- #
+  - name: returns
+    description: Return requests (one row per returned line).
+    model: ref('fct_returns')
+    defaults:
+      agg_time_dimension: request_date
+    entities:
+      - name: return
+        type: primary
+        expr: return_id
+      - name: order
+        type: foreign
+        expr: order_id
+    dimensions:
+      - name: request_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: category
+        type: categorical
+      - name: reason
+        type: categorical
+    measures:
+      - name: returns_count
+        description: Return requests.
+        agg: sum
+        expr: 1
+      - name: returned_units
+        description: Units returned.
+        agg: sum
+        expr: quantity
+      - name: refunds
+        description: Refund value of returns.
+        agg: sum
+        expr: refund_amount
+
+  # ----------------------------------------------------------------------- #
+  # Payments
+  # ----------------------------------------------------------------------- #
+  - name: payments
+    description: Payment transactions (charges and refunds).
+    model: ref('fct_payments')
+    defaults:
+      agg_time_dimension: transaction_date
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_id
+      - name: order
+        type: foreign
+        expr: order_id
+    dimensions:
+      - name: transaction_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: payment_method
+        type: categorical
+      - name: kind
+        type: categorical
+      - name: status
+        type: categorical
+    measures:
+      - name: payments_captured
+        description: Value of succeeded charges.
+        agg: sum
+        expr: case when kind = 'charge' and status = 'succeeded' then amount else 0 end
+      - name: payment_failures
+        description: Failed charge attempts.
+        agg: sum
+        expr: case when status = 'failed' then 1 else 0 end

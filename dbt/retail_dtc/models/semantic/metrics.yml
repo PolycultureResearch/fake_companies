@@ -1,0 +1,197 @@
+version: 2
+
+metrics:
+
+  # --- Marketing & traffic -------------------------------------------------
+  - name: marketing_spend
+    description: Total ad-platform spend.
+    type: simple
+    label: Marketing Spend
+    type_params:
+      measure:
+        name: marketing_spend
+        fill_nulls_with: 0
+
+  - name: sessions
+    description: Web sessions.
+    type: simple
+    label: Sessions
+    type_params:
+      measure:
+        name: sessions
+        fill_nulls_with: 0
+
+  # --- Orders & customers --------------------------------------------------
+  - name: orders
+    description: Orders placed.
+    type: simple
+    label: Orders
+    type_params:
+      measure:
+        name: orders
+        fill_nulls_with: 0
+
+  - name: new_customers
+    description: Customers acquired (first orders).
+    type: simple
+    label: New Customers
+    type_params:
+      measure:
+        name: new_customers
+        fill_nulls_with: 0
+
+  - name: returning_customer_orders
+    description: Orders from existing customers (repeat purchases).
+    type: simple
+    label: Returning-Customer Orders
+    type_params:
+      measure:
+        name: returning_customer_orders
+        fill_nulls_with: 0
+
+  - name: repeat_order_share
+    description: Share of orders placed by existing customers.
+    type: ratio
+    label: Repeat Order Share
+    type_params:
+      numerator: returning_customer_orders
+      denominator: orders
+
+  - name: session_orders
+    description: Orders attributed to a web session (conversion numerator).
+    type: simple
+    label: Session-Attributed Orders
+    type_params:
+      measure:
+        name: session_orders
+        fill_nulls_with: 0
+
+  - name: conversion_rate
+    description: Session-attributed orders per session (site conversion).
+    type: ratio
+    label: Conversion Rate
+    type_params:
+      numerator: session_orders
+      denominator: sessions
+
+  # --- Revenue -------------------------------------------------------------
+  - name: units
+    description: Units sold.
+    type: simple
+    label: Units
+    type_params:
+      measure:
+        name: units
+        fill_nulls_with: 0
+
+  - name: gross_revenue
+    description: Merchandise revenue before discounts and refunds.
+    type: simple
+    label: Gross Revenue
+    type_params:
+      measure:
+        name: gross_revenue
+        fill_nulls_with: 0
+
+  - name: discounts
+    description: Promo discounts given.
+    type: simple
+    label: Discounts
+    type_params:
+      measure:
+        name: discounts
+        fill_nulls_with: 0
+
+  - name: refunds
+    description: Refund value of returns (booked at request resolution).
+    type: simple
+    label: Refunds
+    type_params:
+      measure:
+        name: refunds
+        fill_nulls_with: 0
+
+  - name: net_revenue
+    description: Gross revenue minus discounts and refunds. Refunds are booked
+      on the return-request day, which lags the order by delivery + request
+      time — a return-rate anomaly therefore dents net_revenue with a delay.
+    type: derived
+    label: Net Revenue
+    type_params:
+      expr: gross_revenue - discounts - refunds
+      metrics:
+        - name: gross_revenue
+        - name: discounts
+        - name: refunds
+
+  - name: aov
+    description: Average order value (gross revenue / orders).
+    type: ratio
+    label: AOV
+    type_params:
+      numerator: gross_revenue
+      denominator: orders
+
+  - name: gross_margin
+    description: Merchandise margin (line revenue - unit cost), before discounts.
+    type: simple
+    label: Gross Margin
+    type_params:
+      measure:
+        name: gross_margin
+        fill_nulls_with: 0
+
+  - name: margin_rate
+    description: Gross margin as a share of gross revenue.
+    type: ratio
+    label: Margin Rate
+    type_params:
+      numerator: gross_margin
+      denominator: gross_revenue
+
+  # --- Returns -------------------------------------------------------------
+  - name: return_rate
+    description: Returned units per unit sold, both bucketed by their own day.
+      Returns lag sales by delivery + request time, so the daily ratio is
+      offset-biased near the timeline tail — read it over windows, not days.
+    type: ratio
+    label: Return Rate
+    type_params:
+      numerator: returned_units
+      denominator: units
+
+  - name: returned_units
+    description: Units returned.
+    type: simple
+    label: Returned Units
+    type_params:
+      measure:
+        name: returned_units
+        fill_nulls_with: 0
+
+  # --- Payments & fulfillment ----------------------------------------------
+  - name: payments_captured
+    description: Value of succeeded charges.
+    type: simple
+    label: Payments Captured
+    type_params:
+      measure:
+        name: payments_captured
+        fill_nulls_with: 0
+
+  - name: payment_failures
+    description: Failed charge attempts.
+    type: simple
+    label: Payment Failures
+    type_params:
+      measure:
+        name: payment_failures
+        fill_nulls_with: 0
+
+  - name: avg_fulfillment_days
+    description: Mean days from order placement to delivery (delivered orders only).
+    type: simple
+    label: Avg Fulfillment Days
+    type_params:
+      measure:
+        name: avg_fulfillment_days_measure

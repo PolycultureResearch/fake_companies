@@ -25,7 +25,11 @@ _available = importlib.util.find_spec("dbt") is not None and MF.exists() and DBT
 
 @pytest.mark.slow
 @pytest.mark.skipif(not _available, reason="dbt extra / mf not installed")
-def test_consumer_contracts(tmp_path):
+@pytest.mark.parametrize(
+    ("config_name", "vertical"),
+    [("smoke_90d", "b2c_saas"), ("smoke_retail_90d", "retail_dtc")],
+)
+def test_consumer_contracts(config_name, vertical, tmp_path):
     db = tmp_path / "consumers.duckdb"
     base_env = {**os.environ, "PYTHONPATH": "src"}
 
@@ -36,7 +40,7 @@ def test_consumer_contracts(tmp_path):
             "fake_companies.cli",
             "generate",
             "--config",
-            "configs/smoke_90d.yaml",
+            f"configs/{config_name}.yaml",
             "--out",
             str(db),
         ],
@@ -48,9 +52,9 @@ def test_consumer_contracts(tmp_path):
     )
     assert gen.returncode == 0, gen.stderr
 
-    env = {**os.environ, "DBT_PROFILES_DIR": str(ROOT / "dbt" / "b2c_saas"), "FAKE_DB": str(db)}
+    env = {**os.environ, "DBT_PROFILES_DIR": str(ROOT / "dbt" / vertical), "FAKE_DB": str(db)}
     build = subprocess.run(
-        [str(DBT), "build", "--project-dir", "dbt/b2c_saas"],
+        [str(DBT), "build", "--project-dir", f"dbt/{vertical}"],
         cwd=ROOT,
         env=env,
         capture_output=True,
