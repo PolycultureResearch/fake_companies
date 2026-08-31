@@ -42,6 +42,7 @@ def build_sessions(
     cfg: ScenarioConfig, cal: Calendar, rng: RngHub, panel: DriverPanel
 ) -> pd.DataFrame:
     gen = rng.stream("traffic")
+    landing_pages = cfg.traffic.landing_pages or _LANDING_PAGES
     countries = list(cfg.mix.country)
     country_p = list(cfg.mix.country.values())
     devices = list(cfg.mix.device)
@@ -73,7 +74,7 @@ def build_sessions(
                         1 + gen.poisson(max(cfg.traffic.page_views_mean - 1, 0.1), size=total)
                     ).astype(np.int32),
                     "landing_page": sample_labels(
-                        gen, _LANDING_PAGES, [1] * len(_LANDING_PAGES), total
+                        gen, landing_pages, [1] * len(landing_pages), total
                     ),
                 }
             )

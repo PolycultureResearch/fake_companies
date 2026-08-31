@@ -66,6 +66,9 @@ extend-select = ["I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Import the package from src/ directly: uv's editable .pth install is flaky on
+# this machine (see memory note), and tests must not depend on it.
+pythonpath = ["src"]
 markers = [
     "slow: statistical / end-to-end suite (deselect with -m 'not slow')",
 ]

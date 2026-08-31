@@ -1,0 +1,155 @@
+# Small 90-day retail scenario for CI / quick test loops. Same shape as
+# alpenglow_retail_dtc, smaller scale.
+company:
+  name: Retail Smoke
+  slug: retail_smoke
+  vertical: retail_dtc
+  currency: USD
+  industry: retail_dtc
+
+seed: 11
+
+timeline:
+  start: 2024-01-01
+  days: 90
+
+calendar:
+  holiday_country: US
+  holiday_effect: 1.25
+  annual_amp: 0.15
+  annual_peak_doy: 332
+
+weekly_shape: [0.95, 0.92, 0.94, 0.98, 1.05, 1.10, 1.06]
+
+noise:
+  day_sigma: 0.06
+  ar1: 0.3
+
+traffic:
+  duration_seconds_mean: 150
+  page_views_mean: 5.0
+  landing_pages: ["/", "/collections/new", "/collections/sale", "/products", "/about"]
+  channels:
+    organic:
+      kind: organic
+      baseline: 400
+      growth: { kind: linear, rate: 0.003 }
+    paid_search:
+      kind: paid
+      spend_baseline: 250
+      spend_growth: { kind: flat }
+      cpc: 1.2
+    paid_social:
+      kind: paid
+      spend_baseline: 300
+      spend_growth: { kind: flat }
+      cpc: 0.8
+    email:
+      kind: fixed
+      baseline: 120
+      growth: { kind: flat }
+
+mix:
+  country: { US: 0.7, CA: 0.15, GB: 0.15 }
+  device: { desktop: 0.35, mobile: 0.55, tablet: 0.1 }
+
+catalog:
+  categories:
+    tees:
+      n_skus: 24
+      price_min: 24
+      price_max: 42
+      unit_cost_ratio: 0.35
+      popularity: 1.6
+    jackets:
+      n_skus: 12
+      price_min: 120
+      price_max: 260
+      unit_cost_ratio: 0.48
+      popularity: 0.7
+    pants:
+      n_skus: 16
+      price_min: 68
+      price_max: 118
+      unit_cost_ratio: 0.42
+      popularity: 1.0
+    hats:
+      n_skus: 10
+      price_min: 22
+      price_max: 38
+      unit_cost_ratio: 0.30
+      popularity: 0.8
+      sizes: [os]
+
+conversion:
+  order_rate:
+    organic: 0.014
+    paid_search: 0.022
+    paid_social: 0.011
+    email: 0.035
+  order_rate_default: 0.012
+  device_multipliers: { desktop: 1.15, mobile: 0.90, tablet: 1.0 }
+
+basket:
+  items_per_order_mean: 1.7
+  extra_quantity_rate: 0.12
+  free_shipping_threshold: 75
+  shipping_fee: 6.95
+
+repeat:
+  monthly_repeat_rate: 0.11
+  frailty_sigma: 0.7
+  channel_mix: { email: 0.5, direct: 0.3, organic: 0.2 }
+
+returns:
+  rate:
+    tees: 0.05
+    jackets: 0.09
+    pants: 0.11
+    hats: 0.02
+  rate_default: 0.06
+  request_delay_days_mean: 8.0
+  request_delay_sigma: 0.6
+  processing_days_mean: 4.0
+  processing_sigma: 0.4
+
+fulfillment:
+  handling_days_mean: 1.2
+  handling_sigma: 0.5
+  transit_days_mean: 3.5
+  transit_sigma: 0.4
+
+payments:
+  failure_rate: 0.02
+
+promos:
+  - code: WELCOME10
+    window: { start: 2024-01-15, end: 2024-03-30 }
+    discount_pct: 0.10
+    uptake: 0.18
+
+loading:
+  sources:
+    ad_platform: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+    web: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 5, lag_sigma: 0.5 }
+    shop_db: { cadence: micro_batch, batch_minutes: 30, lag_median_minutes: 8, lag_sigma: 0.4 }
+    fulfillment: { cadence: hourly, lag_median_minutes: 20, lag_sigma: 0.5 }
+    payments: { cadence: micro_batch, batch_minutes: 30, lag_median_minutes: 3, lag_sigma: 0.4 }
+
+anomalies:
+  scripted:
+    # Smoke anomalies run hotter than the demo config: the 90-day scale needs
+    # bigger effects for the >=3-sigma honesty tests to have statistical power.
+    - name: mobile_checkout_regression
+      kind: rate
+      type: drop
+      target: conversion_rate.paid_search
+      segment: { device: mobile }
+      window: { start: 2024-02-05, end: 2024-02-18 }
+      magnitude: 0.3
+    - name: orders_pipeline_dupes
+      kind: dq
+      type: duplicate_rows
+      target: shop_db.orders
+      window: { start: 2024-03-12, end: 2024-03-13 }
+      magnitude: 0.9

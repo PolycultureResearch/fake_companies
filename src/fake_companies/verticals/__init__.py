@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .b2c_saas import B2CSaaSVertical
 from .base import DQTableMeta, Vertical
+from .retail_dtc import RetailDTCVertical
 
 REGISTRY: dict[str, Vertical] = {}
 
@@ -20,5 +21,6 @@ def get_vertical(name: str) -> Vertical:
 
 
 register(B2CSaaSVertical())
+register(RetailDTCVertical())
 
 __all__ = ["REGISTRY", "DQTableMeta", "Vertical", "get_vertical", "register"]
