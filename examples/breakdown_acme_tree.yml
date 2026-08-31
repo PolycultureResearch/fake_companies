@@ -8,7 +8,7 @@
 # budget cut cascading to sessions -> signups -> trials -> new MRR).
 provider:
   type: local
-  project_path: "../dbt" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+  project_path: "../dbt/b2c_saas" # dir where `mf query` runs (set FAKE_DB to the duckdb)
 
 metrics:
   - name: marketing_spend

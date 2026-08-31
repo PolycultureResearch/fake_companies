@@ -1,0 +1,10 @@
+fake_companies_retail:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('FAKE_DB', '../../out/alpenglow.duckdb') }}"
+      threads: 4
+      # Raw schemas (ad_platform, web, shop_db, fulfillment, payments, meta)
+      # already live inside the same DuckDB file the generator wrote. dbt
+      # materializes its own models into main / main_staging / main_marts.
