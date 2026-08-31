@@ -31,11 +31,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config import ScenarioConfig
-from ..core import RngHub
-from ..core.calendar import Calendar
-from ..latent import DriverPanel
-from ._util import timestamps_from_days
+from ....core import RngHub
+from ....core.calendar import Calendar
+from ....latent import DriverPanel
+from ....shared._util import timestamps_from_days
+from ..config import B2CSaaSScenarioConfig as ScenarioConfig
 from .plans import PlanIndex
 from .trial_activity import TrialStats
 

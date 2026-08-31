@@ -7,7 +7,8 @@ import hashlib
 from fake_companies.config import load_config
 from fake_companies.generate import run_generation
 from fake_companies.output.export import export_tables
-from fake_companies.output.schemas import ALL_TABLES
+from fake_companies.output.schemas import META_TABLES
+from fake_companies.verticals import get_vertical
 
 
 def _sha(path) -> str:
@@ -29,7 +30,8 @@ def test_parquet_byte_identical(smoke_config_path, tmp_path):
     hashes2 = {p.name: _sha(p) for p in ex2}
     assert hashes1 == hashes2, "parquet exports differ between identical runs"
     # sanity: we actually exported every table
-    assert len(hashes1) == len(ALL_TABLES)
+    vertical = get_vertical(cfg.company.vertical)
+    assert len(hashes1) == len(vertical.tables()) + len(META_TABLES)
 
 
 def test_ground_truth_stable(smoke_config_path):

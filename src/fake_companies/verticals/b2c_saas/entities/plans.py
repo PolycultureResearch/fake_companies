@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..config import ScenarioConfig
+from ..config import B2CSaaSScenarioConfig as ScenarioConfig
 
 
 @dataclass(frozen=True)

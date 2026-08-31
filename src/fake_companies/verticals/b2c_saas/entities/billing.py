@@ -20,10 +20,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config import ScenarioConfig
-from ..core import RngHub
-from ..core.calendar import Calendar
-from ._util import lognormal_around, sample_labels
+from ....core import RngHub
+from ....core.calendar import Calendar
+from ....shared._util import lognormal_around, sample_labels
+from ..config import B2CSaaSScenarioConfig as ScenarioConfig
 from .plans import PlanIndex
 
 _PERIOD_DAYS = {"monthly": 30, "annual": 365}

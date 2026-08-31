@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from fake_companies.anomalies import ResolvedAnomaly
 from fake_companies.config.schema import LoadingConfig, ScriptedAnomaly, SourceLoading, Window
 from fake_companies.core import RngHub
 from fake_companies.core.calendar import Calendar
@@ -29,17 +30,8 @@ from fake_companies.corruption.dq import (
     volume_dropout,
 )
 from fake_companies.corruption.loading import apply_loading, event_reference
-
-try:  # anomalies.py is a sibling-milestone deliverable; fall back locally.
-    from fake_companies.anomalies import ResolvedAnomaly
-except ImportError:  # pragma: no cover
-    from dataclasses import dataclass
-
-    @dataclass
-    class ResolvedAnomaly:  # type: ignore[no-redef]
-        spec: ScriptedAnomaly
-        origin: str
-
+from fake_companies.verticals.b2c_saas.tables import PAYMENTS as PAYMENTS_SPEC
+from fake_companies.verticals.b2c_saas.tables import RAW_TABLES
 
 # --------------------------------------------------------------------------- #
 # Fixtures / builders
@@ -92,26 +84,26 @@ def _cfg() -> SimpleNamespace:
 
 
 def _daily_counts(df: pd.DataFrame, win: Window) -> float:
-    mask = in_window_mask(df, PAYMENTS, CAL, win)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, win)
     days = (win.end - win.start).days + 1
     return int(mask.sum()) / days
 
 
 def _null_rate(df: pd.DataFrame, col: str, win: Window) -> float:
-    mask = in_window_mask(df, PAYMENTS, CAL, win)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, win)
     sub = df.loc[mask, col]
     return float(sub.isna().mean())
 
 
 def _mean_lag_minutes(df: pd.DataFrame, win: Window) -> float:
-    mask = in_window_mask(df, PAYMENTS, CAL, win)
-    ref = event_reference(PAYMENTS, df, CAL)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, win)
+    ref = event_reference(PAYMENTS_SPEC, df, CAL)
     lag = (pd.to_datetime(df["_loaded_at"]) - ref).dt.total_seconds() / 60.0
     return float(lag[mask].mean())
 
 
 def _dist(df: pd.DataFrame, col: str, win: Window) -> pd.Series:
-    mask = in_window_mask(df, PAYMENTS, CAL, win)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, win)
     return df.loc[mask, col].value_counts(normalize=True)
 
 
@@ -130,10 +122,10 @@ def _psi(p_win: pd.Series, p_base: pd.Series, eps: float = 1e-4) -> float:
 def test_loading_stamps_loaded_at_after_event_time():
     df = make_payments()
     frames = {PAYMENTS: df}
-    apply_loading(_cfg(), CAL, _rng(), frames)
+    apply_loading(_cfg(), CAL, _rng(), frames, RAW_TABLES)
     out = frames[PAYMENTS]
     assert "_loaded_at" in out.columns
-    ref = event_reference(PAYMENTS, out, CAL)
+    ref = event_reference(PAYMENTS_SPEC, out, CAL)
     assert (pd.to_datetime(out["_loaded_at"]) >= ref).all()
 
 
@@ -145,7 +137,7 @@ def test_loading_daily_cadence_lands_next_morning():
     cfg = SimpleNamespace(
         loading=LoadingConfig(sources={"ad_platform": SourceLoading(cadence="daily")})
     )
-    apply_loading(cfg, CAL, _rng(), frames)
+    apply_loading(cfg, CAL, _rng(), frames, RAW_TABLES)
     out = frames["ad_platform.ad_spend"]
     loaded = pd.to_datetime(out["_loaded_at"])
     ref = pd.to_datetime(out["date"])
@@ -158,8 +150,8 @@ def test_loading_default_source_when_schema_missing():
     df = make_payments()
     frames = {PAYMENTS: df}
     cfg = SimpleNamespace(loading=LoadingConfig(sources={}))  # no 'billing' key
-    apply_loading(cfg, CAL, _rng(), frames)
-    ref = event_reference(PAYMENTS, frames[PAYMENTS], CAL)
+    apply_loading(cfg, CAL, _rng(), frames, RAW_TABLES)
+    ref = event_reference(PAYMENTS_SPEC, frames[PAYMENTS], CAL)
     assert (pd.to_datetime(frames[PAYMENTS]["_loaded_at"]) >= ref).all()
 
 
@@ -169,7 +161,7 @@ def test_loading_default_source_when_schema_missing():
 def test_volume_dropout():
     df = make_payments()
     mag = 0.3
-    mask = in_window_mask(df, PAYMENTS, CAL, ANOM_WIN)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, ANOM_WIN)
     out = volume_dropout(df, mask, mag, _rng().stream("dq"))
     base = _daily_counts(out, BASE_WIN)
     win = _daily_counts(out, ANOM_WIN)
@@ -180,7 +172,7 @@ def test_volume_dropout():
 def test_null_spike():
     df = make_payments()
     mag = 0.25
-    mask = in_window_mask(df, PAYMENTS, CAL, ANOM_WIN)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, ANOM_WIN)
     out = null_spike(df, mask, mag, "failure_code", _rng().stream("dq"))
     base = _null_rate(out, "failure_code", BASE_WIN)
     win = _null_rate(out, "failure_code", ANOM_WIN)
@@ -191,7 +183,7 @@ def test_null_spike():
 def test_distribution_shift_psi():
     df = make_payments()
     params = {"column": "currency", "new_mix": {"EUR": 0.6, "USD": 0.25, "GBP": 0.15}}
-    mask = in_window_mask(df, PAYMENTS, CAL, ANOM_WIN)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, ANOM_WIN)
     out = distribution_shift(df, mask, params, _rng().stream("dq"))
     base = _dist(out, "currency", BASE_WIN)
     win = _dist(out, "currency", ANOM_WIN)
@@ -201,13 +193,13 @@ def test_distribution_shift_psi():
 def test_loading_delay():
     df = make_payments()
     frames = {PAYMENTS: df}
-    apply_loading(_cfg(), CAL, _rng(), frames)
+    apply_loading(_cfg(), CAL, _rng(), frames, RAW_TABLES)
     mag = 6.0
     df = frames[PAYMENTS]
     baseline_lag = _mean_lag_minutes(df, ANOM_WIN)  # pre-corruption lag in the window
-    mask = in_window_mask(df, PAYMENTS, CAL, ANOM_WIN)
-    out = loading_delay(df, mask, mag, PAYMENTS, CAL)
-    ref = event_reference(PAYMENTS, out, CAL)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, ANOM_WIN)
+    out = loading_delay(df, mask, mag, PAYMENTS_SPEC, CAL)
+    ref = event_reference(PAYMENTS_SPEC, out, CAL)
     assert (pd.to_datetime(out["_loaded_at"]) >= ref).all()
     win_lag = _mean_lag_minutes(out, ANOM_WIN)
     assert win_lag / baseline_lag == pytest.approx(mag, rel=0.02)
@@ -217,7 +209,7 @@ def test_duplicate_rows():
     df = make_payments()
     mag = 0.5
     n_before = len(df)
-    mask = in_window_mask(df, PAYMENTS, CAL, ANOM_WIN)
+    mask = in_window_mask(df, PAYMENTS_SPEC, CAL, ANOM_WIN)
     in_win = int(mask.sum())
     out = duplicate_rows(df, mask, mag, _rng().stream("dq"))
     added = len(out) - n_before
@@ -294,7 +286,7 @@ def _dq_specs() -> list[ResolvedAnomaly]:
 def test_apply_loading_and_dq_emits_ground_truth():
     frames = {PAYMENTS: make_payments()}
     resolved = _dq_specs()
-    records = apply_loading_and_dq(_cfg(), CAL, _rng(), frames, resolved)
+    records = apply_loading_and_dq(_cfg(), CAL, _rng(), frames, resolved, tables=RAW_TABLES)
     assert len(records) == len(resolved)
     for rec in records:
         assert rec.kind == "dq"
@@ -304,7 +296,7 @@ def test_apply_loading_and_dq_emits_ground_truth():
 
 def test_apply_loading_and_dq_without_resolved_still_loads():
     frames = {PAYMENTS: make_payments()}
-    records = apply_loading_and_dq(_cfg(), CAL, _rng(), frames)
+    records = apply_loading_and_dq(_cfg(), CAL, _rng(), frames, tables=RAW_TABLES)
     assert records == []
-    ref = event_reference(PAYMENTS, frames[PAYMENTS], CAL)
+    ref = event_reference(PAYMENTS_SPEC, frames[PAYMENTS], CAL)
     assert (pd.to_datetime(frames[PAYMENTS]["_loaded_at"]) >= ref).all()

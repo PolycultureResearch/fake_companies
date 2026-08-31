@@ -24,36 +24,32 @@ import pandas as pd
 from ..config.schema import BaseScenarioConfig, SourceLoading
 from ..core import RngHub
 from ..core.calendar import Calendar
-from ..output.schemas import BY_FQN, RAW_TABLES
+from ..output.schemas import TableSpec
 
 __all__ = ["apply_loading", "event_reference"]
 
 # Sane fallback when a schema has no source config: a simple ~30 min lag.
 _DEFAULT_SOURCE = SourceLoading(cadence="streaming", lag_median_minutes=30.0, lag_sigma=0.5)
 
-# Event-reference column where the TableSpec has no ``event_time`` (or where the
-# event_time column is a DATE that must be treated as midnight).
-_REF_COL: dict[str, str] = {
-    "ad_platform.ad_spend": "date",  # DATE -> midnight
-    "app_db.users": "created_at",
-}
 
-
-def event_reference(fqn: str, df: pd.DataFrame, cal: Calendar) -> pd.Series:
+def event_reference(spec: TableSpec, df: pd.DataFrame, cal: Calendar) -> pd.Series:
     """Row-level business-event timestamp used as the loading anchor.
 
+    Driven entirely by the spec: ``reference_data`` anchors at a single nominal
+    timestamp, a tuple ``loading_ref`` coalesces left to right, otherwise the
+    named column (falling back to ``event_time``, then ``created_at``).
     Returns a ``datetime64[ns]`` Series aligned to ``df.index``.
     """
-    if fqn == "app_db.subscriptions":
-        # Coalesce paid start onto trial start.
-        ref = df["started_at"].where(df["started_at"].notna(), df["trial_start_at"])
-        return pd.to_datetime(ref)
-    if fqn == "app_db.plans":
-        # Plans are reference data: a single fixed early nominal timestamp.
+    if spec.reference_data:
         return pd.Series(pd.Timestamp(cal.start), index=df.index)
-
-    spec = BY_FQN.get(fqn)
-    col = _REF_COL.get(fqn) or (spec.event_time if spec is not None else None) or "created_at"
+    ref = spec.loading_ref
+    if isinstance(ref, tuple):
+        first, *rest = ref
+        out = df[first]
+        for col in rest:
+            out = out.where(out.notna(), df[col])
+        return pd.to_datetime(out)
+    col = ref or spec.event_time or "created_at"
     return pd.to_datetime(df[col])
 
 
@@ -70,17 +66,22 @@ def apply_loading(
     cal: Calendar,
     rng: RngHub,
     frames: dict[str, pd.DataFrame],
+    tables: list[TableSpec],
 ) -> None:
-    """Fill ``_loaded_at`` on every raw frame present in ``frames`` (in place)."""
+    """Fill ``_loaded_at`` on every raw frame present in ``frames`` (in place).
+
+    ``tables`` (the vertical's raw specs) fixes the iteration order — it feeds
+    RNG draw order, so it must be stable for determinism.
+    """
     gen = rng.stream("loading")
-    for spec in RAW_TABLES:  # fixed iteration order for determinism
+    for spec in tables:
         fqn = spec.fqn
         df = frames.get(fqn)
         if df is None:
             continue
 
         src = cfg.loading.sources.get(spec.schema, _DEFAULT_SOURCE)
-        ref = event_reference(fqn, df, cal)
+        ref = event_reference(spec, df, cal)
         lag = pd.to_timedelta(
             _lag_minutes(gen, src.lag_median_minutes, src.lag_sigma, len(df)), "m"
         )

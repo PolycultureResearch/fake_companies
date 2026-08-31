@@ -13,27 +13,30 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..config import BaseScenarioConfig
 from ..config.schema import Window
 from ..core.calendar import Calendar
 from ..groundtruth import GroundTruthRecord
-from .build import known_drivers
 from .panel import DriverPanel
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..anomalies import ResolvedAnomaly
 
 
 def apply_rate_events(
     panel: DriverPanel,
     resolved: list[ResolvedAnomaly],
-    cfg: BaseScenarioConfig,
     cal: Calendar,
+    known: set[str],
+    affected: Callable[[str], list[str]],
 ) -> tuple[DriverPanel, list[GroundTruthRecord]]:
+    """Multiply anomaly windows into the panel; ``known``/``affected`` come from
+    the vertical (its driver catalog and driver->metric impact map)."""
     # Imported lazily to avoid a latent<->anomalies import cycle.
-    from ..anomalies import affected_metrics_for_driver, rate_anomalies
+    from ..anomalies import rate_anomalies
 
-    valid = known_drivers(cfg)
+    valid = known
     records: list[GroundTruthRecord] = []
     for r in rate_anomalies(resolved):
         a = r.spec
@@ -56,7 +59,7 @@ def apply_rate_events(
                 start=a.window.start,
                 end=a.window.end,
                 magnitude=a.magnitude,
-                affected_metrics=affected_metrics_for_driver(a.target),
+                affected_metrics=affected(a.target),
                 params=a.params or {},
             )
         )

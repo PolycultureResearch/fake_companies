@@ -14,12 +14,14 @@ from typing import Self
 import duckdb
 import pandas as pd
 
-from .schemas import ALL_TABLES, BY_FQN, TableSpec
+from .schemas import TableSpec
 
 
 class DuckDBWriter:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, tables: list[TableSpec]):
         self.path = Path(path)
+        self.tables = list(tables)
+        self.by_fqn = {t.fqn: t for t in self.tables}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists():
             self.path.unlink()  # deterministic: always a fresh database
@@ -27,15 +29,15 @@ class DuckDBWriter:
         self._create_all()
 
     def _create_all(self) -> None:
-        schemas = {t.schema for t in ALL_TABLES}
+        schemas = {t.schema for t in self.tables}
         for s in sorted(schemas):
             self.con.execute(f"CREATE SCHEMA IF NOT EXISTS {s}")
-        for spec in ALL_TABLES:
+        for spec in self.tables:
             self.con.execute(spec.ddl())
 
     def write(self, fqn: str, df: pd.DataFrame) -> None:
-        """Insert a frame into ``fqn``, coercing to the registry column order."""
-        spec = BY_FQN[fqn]
+        """Insert a frame into ``fqn``, coercing to the spec's column order."""
+        spec = self.by_fqn[fqn]
         frame = _coerce(df, spec)
         self.con.register("_incoming", frame)
         cols = ", ".join(f'"{c}"' for c in spec.columns)

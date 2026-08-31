@@ -5,11 +5,15 @@ import pytest
 
 from fake_companies.anomalies import resolve_anomalies
 from fake_companies.core import RngHub, build_calendar
-from fake_companies.entities.funnel import build_users
-from fake_companies.entities.marketing import build_ad_spend
-from fake_companies.entities.plans import build_plan_index
-from fake_companies.entities.traffic import build_sessions
-from fake_companies.latent import apply_rate_events, build_drivers
+from fake_companies.latent import apply_rate_events
+from fake_companies.shared.marketing import build_ad_spend
+from fake_companies.shared.traffic import build_sessions
+from fake_companies.verticals import get_vertical
+from fake_companies.verticals.b2c_saas.drivers import build_drivers
+from fake_companies.verticals.b2c_saas.entities.funnel import build_users
+from fake_companies.verticals.b2c_saas.entities.plans import build_plan_index
+
+VERTICAL = get_vertical("b2c_saas")
 
 
 @pytest.fixture
@@ -17,9 +21,11 @@ def built(smoke_cfg):
     cfg = smoke_cfg
     cal = build_calendar(cfg)
     rng = RngHub(cfg.seed)
-    resolved = resolve_anomalies(cfg, cal, rng)
+    resolved = resolve_anomalies(cfg, cal, rng, VERTICAL)
     panel = build_drivers(cfg, cal, rng)
-    panel, _ = apply_rate_events(panel, resolved, cfg, cal)
+    panel, _ = apply_rate_events(
+        panel, resolved, cal, known=VERTICAL.known_drivers(cfg), affected=VERTICAL.affected_metrics
+    )
     ad = build_ad_spend(cfg, cal, rng, panel)
     sessions = build_sessions(cfg, cal, rng, panel)
     users = build_users(cfg, cal, rng, panel, sessions)

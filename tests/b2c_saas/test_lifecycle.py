@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 
 from fake_companies.config import load_config
-from fake_companies.entities.plans import build_plan_index
 from fake_companies.generate import generate
+from fake_companies.verticals.b2c_saas.entities.plans import build_plan_index
 
 
 @pytest.fixture(scope="module")

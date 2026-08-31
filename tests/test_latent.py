@@ -7,7 +7,17 @@ import numpy as np
 from fake_companies.anomalies import resolve_anomalies
 from fake_companies.config import load_config
 from fake_companies.core import RngHub, build_calendar
-from fake_companies.latent import apply_rate_events, build_drivers, known_drivers
+from fake_companies.latent import apply_rate_events
+from fake_companies.verticals import get_vertical
+from fake_companies.verticals.b2c_saas.drivers import build_drivers, known_drivers
+
+VERTICAL = get_vertical("b2c_saas")
+
+
+def _apply(panel, resolved, cfg, cal):
+    return apply_rate_events(
+        panel, resolved, cal, known=VERTICAL.known_drivers(cfg), affected=VERTICAL.affected_metrics
+    )
 
 
 def _setup(cfg):
@@ -69,10 +79,10 @@ def test_determinism_same_seed(smoke_cfg):
 
 def test_level_shift_changes_windowed_mean(smoke_cfg):
     cal, rng = _setup(smoke_cfg)
-    resolved = resolve_anomalies(smoke_cfg, cal, rng)
+    resolved = resolve_anomalies(smoke_cfg, cal, rng, VERTICAL)
     clean = build_drivers(smoke_cfg, cal, RngHub(smoke_cfg.seed))
     dirty = build_drivers(smoke_cfg, cal, RngHub(smoke_cfg.seed))
-    dirty, records = apply_rate_events(dirty, resolved, smoke_cfg, cal)
+    dirty, records = _apply(dirty, resolved, smoke_cfg, cal)
 
     # smoke config injects a spend.paid_search level_shift x0.6 over 2024-02-01..14.
     rec = next(r for r in records if r.target == "spend.paid_search")
@@ -85,9 +95,9 @@ def test_level_shift_changes_windowed_mean(smoke_cfg):
 
 def test_ground_truth_emitted_for_each_rate_event(smoke_cfg):
     cal, rng = _setup(smoke_cfg)
-    resolved = resolve_anomalies(smoke_cfg, cal, rng)
+    resolved = resolve_anomalies(smoke_cfg, cal, rng, VERTICAL)
     panel = build_drivers(smoke_cfg, cal, rng)
-    _, records = apply_rate_events(panel, resolved, smoke_cfg, cal)
+    _, records = _apply(panel, resolved, smoke_cfg, cal)
     n_rate = sum(1 for r in resolved if r.spec.kind == "rate")
     assert len(records) == n_rate
     for rec in records:
@@ -98,10 +108,10 @@ def test_segmented_event_leaves_topline_clean(acme_config_path):
     cfg = load_config(acme_config_path)
     cal = build_calendar(cfg)
     rng = RngHub(cfg.seed)
-    resolved = resolve_anomalies(cfg, cal, rng)
+    resolved = resolve_anomalies(cfg, cal, rng, VERTICAL)
     clean = build_drivers(cfg, cal, RngHub(cfg.seed))
     dirty = build_drivers(cfg, cal, RngHub(cfg.seed))
-    dirty, _ = apply_rate_events(dirty, resolved, cfg, cal)
+    dirty, _ = _apply(dirty, resolved, cfg, cal)
     # paid_social signup regression is confined to {US, mobile}; topline unchanged.
     seg = {"country": "US", "device": "mobile"}
     assert np.allclose(dirty.get("signup_rate.paid_social"), clean.get("signup_rate.paid_social"))

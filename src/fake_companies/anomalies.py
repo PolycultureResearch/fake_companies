@@ -1,9 +1,9 @@
 """Resolve the full anomaly set (scripted + surprise-sampled) for a run.
 
 Sampling happens once, deterministically, from a single ``anomalies.surprise``
-RNG stream so the rate layer (M1) and the dq layer (M4) see a stable split by
-kind. Each resolved anomaly also knows which downstream metrics / dataflow
-signals it is expected to move — recorded in its :class:`GroundTruthRecord`.
+RNG stream so the rate layer and the dq layer see a stable split by kind. What
+can be targeted — drivers, dq tables, dq columns — comes from the vertical;
+this module owns only the generic sampling mechanics and the dq-signal map.
 """
 
 from __future__ import annotations
@@ -13,38 +13,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import ScenarioConfig
+from .config import BaseScenarioConfig
 from .config.schema import ScriptedAnomaly, Window
 from .core import RngHub
 from .core.calendar import Calendar
-from .latent.build import known_drivers
-
-# Which raw columns a dq event can target, per table.
-DQ_TABLE_META: dict[str, dict[str, list[str]]] = {
-    "web.sessions": {
-        "categorical": ["channel", "country", "device"],
-        "nullable": ["user_id", "utm_campaign"],
-        "numeric": ["duration_seconds", "page_views"],
-    },
-    "billing.payments": {
-        "categorical": ["currency", "payment_method", "status"],
-        "nullable": ["failure_code"],
-        "numeric": ["amount"],
-    },
-    "product.events": {
-        "categorical": ["event_name", "plan_at_event", "country", "device"],
-        "nullable": [],
-        "numeric": [],
-    },
-    "billing.invoices": {
-        "categorical": ["currency", "status"],
-        "nullable": [],
-        "numeric": ["amount"],
-    },
-}
-
-# Tables suitable as surprise-dq targets (Tremor dataflow "stars").
-_DQ_SURPRISE_TABLES = ["product.events", "billing.payments", "web.sessions"]
+from .verticals.base import Vertical
 
 _RATE_SURPRISE_TYPES = ["spike", "drop", "level_shift", "trend_change", "ramp"]
 _DQ_SURPRISE_TYPES = [
@@ -62,10 +35,12 @@ class ResolvedAnomaly:
     origin: str  # "scripted" | "surprise"
 
 
-def resolve_anomalies(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> list[ResolvedAnomaly]:
+def resolve_anomalies(
+    cfg: BaseScenarioConfig, cal: Calendar, rng: RngHub, vertical: Vertical
+) -> list[ResolvedAnomaly]:
     resolved = [ResolvedAnomaly(a, "scripted") for a in cfg.anomalies.scripted]
     if cfg.anomalies.surprise is not None:
-        resolved.extend(_sample_surprise(cfg, cal, rng, resolved))
+        resolved.extend(_sample_surprise(cfg, cal, rng, resolved, vertical))
     return resolved
 
 
@@ -81,15 +56,18 @@ def dq_anomalies(resolved: list[ResolvedAnomaly]) -> list[ResolvedAnomaly]:
 # Surprise sampling
 # --------------------------------------------------------------------------- #
 def _sample_surprise(
-    cfg: ScenarioConfig,
+    cfg: BaseScenarioConfig,
     cal: Calendar,
     rng: RngHub,
     existing: list[ResolvedAnomaly],
+    vertical: Vertical,
 ) -> list[ResolvedAnomaly]:
     sc = cfg.anomalies.surprise
     assert sc is not None
     gen = rng.stream("anomalies.surprise")
-    drivers = sorted(known_drivers(cfg))
+    drivers = sorted(vertical.known_drivers(cfg))
+    dq_tables = vertical.dq_surprise_tables()
+    dq_meta = vertical.dq_targets()
     taken = [cal.date_to_index(r.spec.window.start) for r in existing]
 
     excluded = np.zeros(cal.n_days, dtype=bool)
@@ -117,7 +95,9 @@ def _sample_surprise(
             continue
         start = cal.start + dt.timedelta(days=i0)
         magnitude = float(gen.uniform(sc.magnitude.min, sc.magnitude.max))
-        spec = _build_surprise_spec(kind, atype, start, magnitude, cal, gen, drivers)
+        spec = _build_surprise_spec(
+            kind, atype, start, magnitude, cal, gen, drivers, dq_tables, dq_meta
+        )
         if spec is None:
             continue
         taken.append(i0)
@@ -133,6 +113,8 @@ def _build_surprise_spec(
     cal: Calendar,
     gen: np.random.Generator,
     drivers: list[str],
+    dq_tables: list[str],
+    dq_meta: dict[str, dict[str, list[str]]],
 ) -> ScriptedAnomaly | None:
     dur = int(gen.integers(1, 4))
     end: dt.date | None = start + dt.timedelta(days=dur - 1)
@@ -147,8 +129,8 @@ def _build_surprise_spec(
         elif atype == "trend_change":
             end = None  # persistent slope break
     else:
-        target = str(gen.choice(_DQ_SURPRISE_TABLES))
-        meta = DQ_TABLE_META.get(target, {})
+        target = str(gen.choice(dq_tables))
+        meta = dq_meta.get(target, {})
         if atype == "null_spike":
             cols = meta.get("nullable") or []
             if not cols:
@@ -176,82 +158,8 @@ def _build_surprise_spec(
 
 
 # --------------------------------------------------------------------------- #
-# Affected metrics / signals
+# Affected dataflow signals for dq events (type-determined, vertical-agnostic)
 # --------------------------------------------------------------------------- #
-_DRIVER_METRICS: list[tuple[str, list[str]]] = [
-    (
-        "spend.",
-        [
-            "marketing_spend",
-            "sessions",
-            "signups",
-            "trials_started",
-            "new_subscriptions",
-            "new_mrr",
-            "mrr",
-        ],
-    ),
-    ("sessions.", ["sessions", "signups", "trials_started", "new_subscriptions", "new_mrr", "mrr"]),
-    (
-        "signup_rate.",
-        ["visit_signup_rate", "signups", "trials_started", "new_subscriptions", "new_mrr"],
-    ),
-    ("trial_start_rate", ["trials_started", "new_subscriptions", "new_mrr"]),
-    ("trial_convert", ["trial_conversion_rate", "new_subscriptions", "new_mrr"]),
-    (
-        "churn.",
-        [
-            "churned_subscriptions",
-            "customer_churn_rate",
-            "churned_mrr",
-            "active_subscriptions",
-            "mrr",
-        ],
-    ),
-    ("upgrade", ["expansion_mrr", "mrr"]),
-    ("downgrade", ["contraction_mrr", "mrr"]),
-    ("resurrect", ["reactivations", "new_subscriptions", "mrr"]),
-    ("direct_convert", ["direct_conversions", "new_subscriptions", "new_mrr", "mrr"]),
-    (
-        "trial_engagement",
-        [
-            "trial_activation_rate",
-            "trial_days_active",
-            "trial_conversion_rate",
-            "trial_conversions",
-            "new_subscriptions",
-            "new_mrr",
-            "product_events",
-        ],
-    ),
-    (
-        "member_engagement",
-        [
-            "member_activity_rate",
-            "dau",
-            "wau",
-            "product_events",
-            "customer_churn_rate",
-            "churned_subscriptions",
-            "churned_mrr",
-            "active_subscriptions",
-            "mrr",
-        ],
-    ),
-    ("dau_over_active.", ["dau", "wau", "product_events"]),
-    ("events_per_active_day.", ["product_events", "dau"]),
-]
-
-
-def affected_metrics_for_driver(driver: str) -> list[str]:
-    for prefix, metrics in _DRIVER_METRICS:
-        if prefix.endswith(".") and driver.startswith(prefix):
-            return metrics
-        if not prefix.endswith(".") and driver == prefix:
-            return metrics
-    return ["mrr"]
-
-
 def affected_signals_for_dq(atype: str, params: dict | None) -> list[str]:
     col = (params or {}).get("column")
     if atype == "volume_dropout":

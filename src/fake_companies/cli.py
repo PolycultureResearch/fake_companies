@@ -99,13 +99,17 @@ def _dump_drivers(cfg, seed, path: Path) -> None:
 
     from .anomalies import resolve_anomalies
     from .core import RngHub, build_calendar
-    from .latent import apply_rate_events, build_drivers
+    from .latent import apply_rate_events
+    from .verticals import get_vertical
 
+    vertical = get_vertical(cfg.company.vertical)
     cal = build_calendar(cfg)
     rng = RngHub(cfg.seed if seed is None else seed)
-    resolved = resolve_anomalies(cfg, cal, rng)
-    panel = build_drivers(cfg, cal, rng)
-    panel, _ = apply_rate_events(panel, resolved, cfg, cal)
+    resolved = resolve_anomalies(cfg, cal, rng, vertical)
+    panel = vertical.build_drivers(cfg, cal, rng)
+    panel, _ = apply_rate_events(
+        panel, resolved, cal, known=vertical.known_drivers(cfg), affected=vertical.affected_metrics
+    )
     df = pd.DataFrame({"date": cal.dates})
     for key, arr in sorted(panel.rates.items()):
         df[key] = arr

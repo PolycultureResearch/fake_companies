@@ -4,7 +4,8 @@ import duckdb
 
 from fake_companies.config import load_config
 from fake_companies.generate import generate, run_generation
-from fake_companies.output.schemas import ALL_TABLES
+from fake_companies.output.schemas import META_TABLES
+from fake_companies.verticals import get_vertical
 
 
 def test_generate_writes_all_tables(smoke_config_path, tmp_path):
@@ -15,7 +16,7 @@ def test_generate_writes_all_tables(smoke_config_path, tmp_path):
 
     con = duckdb.connect(str(out), read_only=True)
     try:
-        for spec in ALL_TABLES:
+        for spec in get_vertical(cfg.company.vertical).tables() + META_TABLES:
             n = con.execute(f"SELECT count(*) FROM {spec.fqn}").fetchone()[0]
             assert n >= 0  # table exists and is queryable
     finally:
