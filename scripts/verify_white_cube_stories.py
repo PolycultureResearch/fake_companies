@@ -34,7 +34,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DBT_DIR = ROOT / "dbt"
+DBT_DIR = ROOT / "dbt" / "b2c_saas"
 
 # label, metric, grain, reference window, analysis window, slice dimension, expected slice
 STORIES: list[tuple[str, str, str, tuple[str, str], tuple[str, str], str | None, str | None]] = [

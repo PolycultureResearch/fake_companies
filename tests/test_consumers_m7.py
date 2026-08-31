@@ -48,9 +48,9 @@ def test_consumer_contracts(tmp_path):
     )
     assert gen.returncode == 0, gen.stderr
 
-    env = {**os.environ, "DBT_PROFILES_DIR": str(ROOT / "dbt"), "FAKE_DB": str(db)}
+    env = {**os.environ, "DBT_PROFILES_DIR": str(ROOT / "dbt" / "b2c_saas"), "FAKE_DB": str(db)}
     build = subprocess.run(
-        [str(DBT), "build", "--project-dir", "dbt"],
+        [str(DBT), "build", "--project-dir", "dbt/b2c_saas"],
         cwd=ROOT,
         env=env,
         capture_output=True,

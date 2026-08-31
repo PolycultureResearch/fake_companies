@@ -50,6 +50,11 @@ determinism tests catch regressions). Do it incrementally — one module per PR.
 
 ## 2. Vertical split — simulate other kinds of business
 
+> **Status (2026-08): in progress.** The core extraction landed (`verticals/` package,
+> `Vertical` protocol, `company.vertical` config field, per-vertical dbt projects under
+> `dbt/<vertical>/`), byte-identical for the existing B2C SaaS configs. The retail_dtc
+> vertical is being built against it.
+
 **Why.** The generator is a *B2C-SaaS* generator wearing a config. E-commerce
 (carts/orders/SKUs, no subscriptions) or B2B SaaS (accounts/seats, sales-led,
 contracts) need a different **entity model and table set**, not new config values.
@@ -103,6 +108,10 @@ extraction first (no behavior change), then add e-commerce against the protocol.
 ---
 
 ## 3. Collapse the four domain registries into the `Vertical`
+
+> **Status (2026-08): done** as part of the vertical split — the registries live in
+> `verticals/<name>/{tables,drivers,dq,metrics}.py`; the conformance test arrives with
+> the second vertical.
 
 **Why.** "What exists in this business" is encoded in **four** places that must be
 hand-kept in sync — a standing maintenance trap and the thing that makes a new
