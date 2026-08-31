@@ -9,6 +9,9 @@ Tremor: for every dataflow monitor in ``examples/tremor_acme.yaml`` confirm the
 raw relation exists in the DuckDB and exposes the event-time, ``_loaded_at``, PK,
 and signal columns the monitor references.
 
+The dbt project and example files are picked from the database's
+``meta.run_manifest.vertical`` (dbt/<vertical>/, examples per vertical).
+
 Usage (from repo root, with the dbt extra installed):
     FAKE_DB=out/acme.duckdb python scripts/verify_consumers.py
 Exits non-zero if any check fails.
@@ -26,17 +29,23 @@ import duckdb
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-DBT_DIR = ROOT / "dbt"
+
+# vertical -> (breakdown tree, tremor config) under examples/
+EXAMPLES = {
+    "b2c_saas": ("breakdown_acme_tree.yml", "tremor_acme.yaml"),
+}
 
 
 def _fake_db() -> Path:
     return Path(os.environ.get("FAKE_DB", ROOT / "out" / "acme.duckdb")).resolve()
 
 
-def verify_breakdown(start: str, end: str) -> list[tuple[str, bool, str]]:
-    tree = yaml.safe_load((ROOT / "examples" / "breakdown_acme_tree.yml").read_text())
+def verify_breakdown(
+    start: str, end: str, dbt_dir: Path, tree_file: str
+) -> list[tuple[str, bool, str]]:
+    tree = yaml.safe_load((ROOT / "examples" / tree_file).read_text())
     metrics = [m["name"] for m in tree["metrics"]]
-    env = {**os.environ, "DBT_PROFILES_DIR": str(DBT_DIR), "FAKE_DB": str(_fake_db())}
+    env = {**os.environ, "DBT_PROFILES_DIR": str(dbt_dir), "FAKE_DB": str(_fake_db())}
     mf = str(ROOT / ".venv" / "bin" / "mf")
     results = []
     for m in metrics:
@@ -56,7 +65,7 @@ def verify_breakdown(start: str, end: str) -> list[tuple[str, bool, str]]:
                     "--csv",
                     tmp.name,
                 ],
-                cwd=DBT_DIR,
+                cwd=dbt_dir,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -73,8 +82,8 @@ def verify_breakdown(start: str, end: str) -> list[tuple[str, bool, str]]:
     return results
 
 
-def verify_tremor() -> list[tuple[str, bool, str]]:
-    cfg = yaml.safe_load((ROOT / "examples" / "tremor_acme.yaml").read_text())
+def verify_tremor(tremor_file: str) -> list[tuple[str, bool, str]]:
+    cfg = yaml.safe_load((ROOT / "examples" / tremor_file).read_text())
     con = duckdb.connect(str(_fake_db()), read_only=True)
     results = []
     try:
@@ -116,8 +125,14 @@ def main() -> int:
     man = dict(con.execute("SELECT key, value FROM meta.run_manifest").fetchall())
     con.close()
     start, end = man.get("timeline_start", "2024-01-01"), man.get("timeline_end", "2024-03-30")
+    vertical = man.get("vertical", "b2c_saas")
+    if vertical not in EXAMPLES:
+        print(f"no consumer examples registered for vertical {vertical!r}", file=sys.stderr)
+        return 2
+    dbt_dir = ROOT / "dbt" / vertical
+    tree_file, tremor_file = EXAMPLES[vertical]
 
-    results = verify_breakdown(start, end) + verify_tremor()
+    results = verify_breakdown(start, end, dbt_dir, tree_file) + verify_tremor(tremor_file)
     ok = True
     for name, passed, detail in results:
         print(f"  {'PASS' if passed else 'FAIL'} {name} ({detail})")

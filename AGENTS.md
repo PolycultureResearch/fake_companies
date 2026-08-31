@@ -13,7 +13,7 @@ Full spec: `docs/plan.md`. Read it before nontrivial changes.
 `fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb`
 writes raw source tables (schemas: ad_platform, web, app_db, billing, product) plus
 `meta.ground_truth` / `meta.run_manifest`, and optionally Parquet/CSV exports. The
-companion dbt project in `dbt/` (dbt-duckdb) models them: staging → marts → MetricFlow
+companion dbt project in `dbt/<vertical>/` (dbt-duckdb) models them: staging → marts → MetricFlow
 semantic layer. Consumers fetch daily metric series via
 `mf query --metrics <m> --group-by metric_time__day --csv` (Breakdown's exact path;
 Tremor KPI mode too). Tremor dataflow mode profiles the raw tables directly (needs
@@ -57,7 +57,7 @@ Every injected anomaly (rate or dq, scripted or surprise-sampled) emits a
 - `uv run fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb`
 - `uv run pytest` (`-m "not slow"` for quick loop; slow = statistical suite)
 - `uv run ruff check . && uv run ruff format .` (line length 100)
-- dbt: `cd dbt && dbt build` (profile reads `FAKE_DB` env var, default `../out/acme.duckdb`)
+- dbt: `cd dbt/b2c_saas && dbt build` (profile reads `FAKE_DB` env var, default `../../out/acme.duckdb`)
 - Semantic layer: `mf validate-configs`, then
   `mf query --metrics mrr --group-by metric_time__day --csv /tmp/mrr.csv`
 
