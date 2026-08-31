@@ -14,7 +14,7 @@ from functools import cached_property
 import numpy as np
 import pandas as pd
 
-from ..config.schema import ScenarioConfig
+from ..config.schema import BaseScenarioConfig
 
 
 @dataclass(frozen=True)
@@ -71,5 +71,5 @@ class Calendar:
         return slice(i0, i1 + 1)
 
 
-def build_calendar(cfg: ScenarioConfig) -> Calendar:
+def build_calendar(cfg: BaseScenarioConfig) -> Calendar:
     return Calendar(start=cfg.timeline.start, end=cfg.timeline.end_date)

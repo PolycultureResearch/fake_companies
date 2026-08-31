@@ -1,8 +1,14 @@
-"""Pydantic models mirroring the scenario YAML 1:1.
+"""Pydantic models for the vertical-agnostic scenario envelope.
 
-The config *is* the API: every tunable behavior lives here, and the YAML is
-validated against these models at load time (unknown keys, out-of-range dates,
-bad segment dims → load-time errors). See ``docs/plan.md`` "Config YAML shape".
+The config *is* the API: every tunable behavior lives here or in a vertical's
+config model, and the YAML is validated against these models at load time
+(unknown keys, out-of-range dates, bad segment dims → load-time errors).
+
+This module holds only what every vertical shares: company/timeline/calendar,
+noise, loading, and the anomaly grammar. Business-model sections (funnel,
+plans, catalog, …) live on each vertical's ``BaseScenarioConfig`` subclass —
+see ``fake_companies.verticals``. Shared optional sections (traffic, mix) live
+in ``config.sections``.
 """
 
 from __future__ import annotations
@@ -11,9 +17,6 @@ import datetime as dt
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-# Segment dimensions a rate anomaly (or per-segment override) may filter on.
-SEGMENT_DIMS = frozenset({"country", "device", "channel", "plan"})
 
 RATE_ANOMALY_TYPES = frozenset(
     {"spike", "drop", "level_shift", "trend_change", "seasonality_change", "ramp"}
@@ -67,11 +70,12 @@ class GrowthConfig(_Base):
 
 
 # --------------------------------------------------------------------------- #
-# Top-level sections
+# Envelope sections
 # --------------------------------------------------------------------------- #
 class CompanyConfig(_Base):
     name: str
     slug: str
+    vertical: str = "b2c_saas"  # selects the business model (see verticals.REGISTRY)
     currency: str = "USD"
     industry: str | None = None
 
@@ -113,99 +117,8 @@ class NoiseConfig(_Base):
     ar1: float = 0.0  # AR(1) autocorrelation of the log day-effect
 
 
-class SessionChannel(_Base):
-    """A traffic channel. Paid channels derive sessions from spend / cpc."""
-
-    kind: Literal["organic", "paid", "fixed"] = "fixed"
-    baseline: float | None = None  # organic/fixed: sessions per day at t0
-    growth: GrowthConfig = Field(default_factory=GrowthConfig)
-    spend_baseline: float | None = None  # paid: ad spend per day at t0
-    spend_growth: GrowthConfig | None = None
-    cpc: float | None = None  # paid: cost per click (~ cost per session)
-
-    @model_validator(mode="after")
-    def _check(self) -> SessionChannel:
-        if self.kind == "paid":
-            if self.spend_baseline is None or self.cpc is None:
-                raise ValueError("paid channel requires `spend_baseline` and `cpc`")
-        elif self.baseline is None:
-            raise ValueError(f"{self.kind} channel requires `baseline`")
-        return self
-
-
-class TrafficConfig(_Base):
-    channels: dict[str, SessionChannel]
-    duration_seconds_mean: float = 180.0
-    page_views_mean: float = 4.0
-
-
-class MixConfig(_Base):
-    country: dict[str, float]
-    device: dict[str, float]
-
-
-class FunnelConfig(_Base):
-    signup_rate: dict[str, float]  # per-channel P(session -> signup)
-    signup_rate_default: float = 0.02  # channels absent from signup_rate
-    trial_start_rate: float = 0.5  # P(signup starts a trial vs stays free)
-
-
-class PlanConfig(_Base):
-    name: str
-    monthly_price: float
-    annual_price: float | None = None
-
-
-class PlansConfig(_Base):
-    plans: list[PlanConfig]
-    plan_mix: dict[str, float]  # distribution over paid plans for converting trials
-    annual_share: float = 0.3  # fraction of paid subscriptions billed annually
-
-
-class LifecycleConfig(_Base):
-    trial_days: int = 14
-    trial_convert: float = 0.15  # P(trial converts to paid), cohort mean
-    monthly_churn: dict[str, float]  # per-plan monthly churn hazard
-    monthly_upgrade: float = 0.02
-    monthly_downgrade: float = 0.01
-    monthly_resurrect: float = 0.01  # P(a churned user resurrects), per month
-    # P(a free non-trial user subscribes directly), per month. The third way
-    # into a paid plan: new_subscriptions = trial converts + resurrects + these.
-    monthly_direct_convert: float = 0.0
-    # Engagement -> conversion coupling. A trial user's conversion probability
-    # is trial_convert * activation_boost^activated * days_boost^days_active,
-    # renormalized by the cohort-wide mean multiplier so the configured
-    # trial_convert stays the realized mean. 1.0 = uncoupled.
-    activation_conversion_boost: float = 1.0
-    days_active_conversion_boost: float = 1.0
-    # Engagement -> churn coupling: hazard *= member_engagement[day]^-gamma_e
-    # * frailty^-gamma_f, each analytically renormalized to preserve the
-    # configured mean hazard. 0.0 = uncoupled.
-    churn_engagement_gamma: float = 0.0
-    churn_frailty_gamma: float = 0.0
-
-
-class EngagementConfig(_Base):
-    dau_over_active: dict[str, float]  # per-plan P(active-sub user active on a day)
-    events_per_active_day: dict[str, float]  # per-plan mean events on an active day
-    frailty_sigma: float = 0.6  # per-user lognormal frailty on event intensity
-    feature_mix: dict[str, float]  # distribution over event_name
-    weekend_uplift: float = 1.0  # B2C usage weekend multiplier (>1 = rises on weekends)
-    # The event that counts as trial activation (the product's aha moment).
-    trial_activation_event: str = "upload_work"
-    # Trial-window intensity relative to the free-tier baseline: trialists are
-    # deliberately trying the product, not idling on the free tier.
-    trial_intensity_boost: float = 1.0
-    # Sigma scale (x noise.day_sigma) of the two shared engagement drivers.
-    # `trial_engagement` moves trial activity AND conversion together;
-    # `member_engagement` moves paid-tier activity AND (inversely) churn.
-    # 0.0 = flat driver = the coupling has no time variation to learn from.
-    trial_engagement_sigma_scale: float = 0.0
-    member_engagement_sigma_scale: float = 0.0
-
-
 class SourceLoading(_Base):
-    cadence: Literal["daily", "hourly", "micro_batch", "streaming"] = "daily"
+    cadence: Literal["daily", "weekly", "hourly", "micro_batch", "streaming"] = "daily"
     batch_minutes: float | None = None  # micro_batch: minutes between batches
     lag_median_minutes: float = 30.0  # median connector lag (lognormal)
     lag_sigma: float = 0.5
@@ -255,7 +168,6 @@ class ScriptedAnomaly(_Base):
         allowed = RATE_ANOMALY_TYPES if self.kind == "rate" else DQ_ANOMALY_TYPES
         if self.type not in allowed:
             raise ValueError(f"{self.kind} anomaly type {self.type!r} not in {sorted(allowed)}")
-        _check_segment(self.segment)
         return self
 
 
@@ -273,35 +185,45 @@ class AnomaliesConfig(_Base):
     surprise: SurpriseConfig | None = None
 
 
-def _check_segment(segment: dict[str, str] | None) -> None:
-    if not segment:
-        return
-    bad = set(segment) - SEGMENT_DIMS
-    if bad:
-        raise ValueError(f"segment dims {sorted(bad)} not in {sorted(SEGMENT_DIMS)}")
+def validate_segment_dims(anomalies: AnomaliesConfig, dims: frozenset[str]) -> None:
+    """Check scripted-anomaly segment filters against a vertical's segment dims.
+
+    The valid dims depend on the business model (a SaaS anomaly can segment by
+    plan, a retail one by category), so each vertical config calls this from its
+    own ``model_validator`` rather than ``ScriptedAnomaly`` hardcoding one set.
+    """
+    for a in anomalies.scripted:
+        if not a.segment:
+            continue
+        bad = set(a.segment) - dims
+        if bad:
+            raise ValueError(
+                f"anomaly {a.name!r}: segment dims {sorted(bad)} not in {sorted(dims)}"
+            )
 
 
 # --------------------------------------------------------------------------- #
-# Root
+# Root envelope
 # --------------------------------------------------------------------------- #
-class ScenarioConfig(_Base):
+class BaseScenarioConfig(_Base):
+    """Vertical-agnostic scenario envelope.
+
+    Each vertical subclasses this, adding its business-model sections as
+    top-level fields (the YAML stays flat). ``config.loader.load_config``
+    resolves ``company.vertical`` first, then validates against the subclass.
+    """
+
     company: CompanyConfig
     seed: int = 0
     timeline: TimelineConfig
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     weekly_shape: list[float] = Field(default_factory=lambda: [1.0] * 7)
     noise: NoiseConfig = Field(default_factory=NoiseConfig)
-    traffic: TrafficConfig
-    mix: MixConfig
-    funnel: FunnelConfig
-    plans: PlansConfig
-    lifecycle: LifecycleConfig
-    engagement: EngagementConfig
     loading: LoadingConfig
     anomalies: AnomaliesConfig = Field(default_factory=AnomaliesConfig)
 
     @model_validator(mode="after")
-    def _cross_checks(self) -> ScenarioConfig:
+    def _cross_checks(self) -> BaseScenarioConfig:
         if len(self.weekly_shape) != 7:
             raise ValueError("weekly_shape must have exactly 7 entries (Mon..Sun)")
         start, end = self.timeline.start, self.timeline.end_date

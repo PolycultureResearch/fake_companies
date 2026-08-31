@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import ScenarioConfig
+from .config import BaseScenarioConfig
 from .core import RngHub, build_calendar
 from .core.calendar import Calendar
 from .groundtruth import GroundTruthRecord
@@ -28,7 +28,7 @@ from .output import (
 
 @dataclass
 class GenerationResult:
-    cfg: ScenarioConfig
+    cfg: BaseScenarioConfig
     seed: int
     calendar: Calendar
     frames: dict[str, pd.DataFrame] = field(default_factory=dict)
@@ -36,7 +36,7 @@ class GenerationResult:
     manifest: dict[str, str] = field(default_factory=dict)
 
 
-def generate(cfg: ScenarioConfig, seed: int | None = None) -> GenerationResult:
+def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResult:
     """Run the full pipeline in memory and return frames + ground truth."""
     seed = cfg.seed if seed is None else seed
     cal = build_calendar(cfg)
@@ -108,7 +108,7 @@ def write_generation(
 
 
 def run_generation(
-    cfg: ScenarioConfig,
+    cfg: BaseScenarioConfig,
     out_path: str | Path,
     seed: int | None = None,
     sidecar_dir: str | Path | None = None,
