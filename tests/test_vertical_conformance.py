@@ -25,6 +25,7 @@ SMOKE_CONFIGS = {
     "b2c_saas": "smoke_90d.yaml",
     "retail_dtc": "smoke_retail_90d.yaml",
     "b2b_services": "smoke_b2b_90d.yaml",
+    "cpg_wholesale": "smoke_cpg_90d.yaml",
 }
 
 VERTICALS = sorted(REGISTRY)

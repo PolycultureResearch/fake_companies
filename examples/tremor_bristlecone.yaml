@@ -1,0 +1,91 @@
+# Tremor monitor config for the Bristlecone (cpg_wholesale) scenario.
+#
+# Tremor is early-stage/volatile, so this stays example-level and builds only on
+# the stable contract: (a) daily MetricFlow KPIs and (b) raw warehouse tables
+# with event-time + `_loaded_at` columns. POS scan data is weekly-grain, so its
+# monitors run at day grain with a weekly cadence in mind.
+#
+# Point connections at a generated database:
+#   fake-companies generate --config configs/bristlecone_cpg.yaml --out out/bristlecone.duckdb
+#   cd dbt/cpg_wholesale && FAKE_DB=../../out/bristlecone.duckdb dbt build
+connections:
+  warehouse:
+    dialect: duckdb
+    dsn: "${FAKE_DB:-out/bristlecone.duckdb}"
+  metricflow:
+    mode: cli
+    project_dir: "./dbt/cpg_wholesale"
+
+schedule:
+  cron: "0 6 * * *"
+
+defaults:
+  dataflow:
+    grain: day
+    training_window_days: 60
+    max_lateness: "1d"
+    threshold_sigma: 3.5
+    min_effect_pct: 5.0
+    cooldown_hours: 24
+    detectors: [robust_z, changepoint]
+  kpi:
+    grain: day
+    training_window_days: 120
+    max_lateness: "1d"
+    seasonality: weekly
+    target_risk: 1.0e-4
+    threshold_sigma: 3.0
+    min_effect_pct: 5.0
+    min_effect_abs: 0.02
+    cooldown_hours: 24
+    detectors: auto
+
+monitors:
+  # --- KPI monitors (daily MetricFlow series) --------------------------------
+  - mode: kpi
+    metric: wholesale_net_revenue
+    source: metricflow
+  - mode: kpi
+    metric: shipped_cases
+    source: metricflow
+  - mode: kpi
+    metric: pos_units
+    source: metricflow
+  - mode: kpi
+    metric: marketing_spend
+    source: metricflow
+
+  # --- Dataflow monitors (raw tables; event_time + _loaded_at) ---------------
+  - mode: dataflow
+    name: erp.shipments
+    connection: warehouse
+    relation: erp.shipments
+    event_time_column: shipped_at
+    loaded_at_column: _loaded_at
+    grain: day
+    guards:
+      freshness_sla: "30h" # catches shipments_loading_delay
+      row_floor: 0
+      schema_hash: true
+      pk_unique: [shipment_id] # catches shipments_dupes (duplicate_rows)
+    signals:
+      - { type: volume }
+      - { type: distribution, column: channel_type, method: psi }
+      - { type: numeric_distribution, column: net_amount, method: quantiles }
+
+  - mode: dataflow
+    name: pos.scan_sales
+    connection: warehouse
+    relation: pos.scan_sales
+    event_time_column: week_start
+    loaded_at_column: _loaded_at
+    grain: day
+    guards:
+      freshness_sla: "9d" # weekly feed: one missed week is an incident
+      row_floor: 0
+      schema_hash: true
+      pk_unique: [scan_id]
+    signals:
+      - { type: volume } # catches pos_feed_outage (volume_dropout)
+      - { type: distribution, column: retailer_banner, method: psi }
+      - { type: numeric_distribution, column: units, method: quantiles }

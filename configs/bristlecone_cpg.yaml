@@ -1,0 +1,183 @@
+# Bristlecone Botanicals — herbal tea & wellness CPG (cpg_wholesale demo
+# scenario). Two winters of wholesale + weekly POS; four scripted rate
+# anomalies, three dq events, two surprises, and a trade-promo calendar.
+#
+# Demo stories:
+#   1. teas_demand_scare     — a contamination news story dents tea demand 25%
+#                              for 2 weeks; shipments follow with the reorder lag
+#   2. whole_earth_delisting — lost secondary shelf placement at the natural
+#                              chain: that banner's velocity down 45% for 6 weeks
+#   3. brand_budget_cut      — paid social cut 60% for 4 weeks; ONLY
+#                              marketing_spend moves (marketing is causally
+#                              decoupled from sales — the RCA decoy)
+#   4. tinctures_viral_spike — a viral moment lifts tincture demand 60% for
+#                              2 weeks, cascading into distributor reorders
+company:
+  name: Bristlecone Botanicals
+  slug: bristlecone
+  vertical: cpg_wholesale
+  currency: USD
+  industry: cpg
+
+seed: 71
+
+timeline:
+  start: 2024-07-01
+  days: 730
+
+calendar:
+  holiday_country: US
+  holiday_effect: 1.15
+  annual_amp: 0.30
+  annual_peak_doy: 10  # deep-winter peak (cold & flu season)
+
+weekly_shape: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+noise:
+  day_sigma: 0.07
+  ar1: 0.35
+
+marketing:
+  channels:
+    paid_social:
+      spend_baseline: 650
+      growth: { kind: linear, rate: 0.0008 }
+      cpc: 0.85
+    paid_search:
+      spend_baseline: 350
+      growth: { kind: flat }
+      cpc: 1.5
+    podcasts:
+      spend_baseline: 250
+      growth: { kind: linear, rate: 0.0010 }
+      cpc: 4.0
+
+catalog:
+  categories:
+    teas:
+      n_products: 18
+      case_size: 6
+      case_price_min: 22
+      case_price_max: 32
+      popularity: 1.6
+    tinctures:
+      n_products: 10
+      case_size: 12
+      case_price_min: 60
+      case_price_max: 88
+      popularity: 0.8
+    capsules:
+      n_products: 8
+      case_size: 12
+      case_price_min: 48
+      case_price_max: 68
+      popularity: 0.7
+
+market:
+  retailers:
+    whole_earth: { channel_type: natural, stores: 240, velocity: 1.8 }
+    greenfields: { channel_type: grocery, stores: 900, velocity: 0.65 }
+    summit_mart: { channel_type: mass, stores: 1400, velocity: 0.32 }
+    vital_online: { channel_type: online, stores: 260, velocity: 0.9 }
+    independents: { channel_type: independents, stores: 640, velocity: 0.5 }
+  distributors:
+    cascadia_naturals: { share: 0.55, region: west }
+    sunhaven: { share: 0.45, region: east }
+
+promos:
+  - name: cold_season_kickoff_we
+    banner: whole_earth
+    category: teas
+    window: { start: 2024-10-14, end: 2024-10-27 }
+    discount_pct: 0.20
+    lift: 1.7
+  - name: new_year_wellness_gf
+    banner: greenfields
+    category: teas
+    window: { start: 2025-01-06, end: 2025-01-19 }
+    discount_pct: 0.15
+    lift: 1.5
+  - name: spring_tinctures_we
+    banner: whole_earth
+    category: tinctures
+    window: { start: 2025-04-07, end: 2025-04-20 }
+    discount_pct: 0.18
+    lift: 1.6
+  - name: cold_season_kickoff_gf
+    banner: greenfields
+    category: teas
+    window: { start: 2025-10-13, end: 2025-10-26 }
+    discount_pct: 0.15
+    lift: 1.5
+  - name: new_year_wellness_we
+    banner: whole_earth
+    category: teas
+    window: { start: 2026-01-05, end: 2026-01-18 }
+    discount_pct: 0.20
+    lift: 1.7
+
+ordering:
+  reorder_lag_days_mean: 4.0
+  reorder_lag_sigma: 0.4
+  order_noise_sigma: 0.15
+
+loading:
+  sources:
+    ad_platform: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+    erp: { cadence: micro_batch, batch_minutes: 60, lag_median_minutes: 15, lag_sigma: 0.4 }
+    pos: { cadence: weekly, lag_median_minutes: 720, lag_sigma: 0.4 }
+    promo: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+
+anomalies:
+  scripted:
+    - name: teas_demand_scare
+      kind: rate
+      type: drop
+      target: consumer_demand.teas
+      window: { start: 2024-11-11, end: 2024-11-24 }
+      magnitude: 0.75
+    - name: whole_earth_delisting
+      kind: rate
+      type: level_shift
+      target: velocity.whole_earth
+      window: { start: 2025-02-10, end: 2025-03-23 }
+      magnitude: 0.55
+    - name: brand_budget_cut
+      kind: rate
+      type: level_shift
+      target: spend.paid_social
+      window: { start: 2025-05-12, end: 2025-06-08 }
+      magnitude: 0.4
+    - name: tinctures_viral_spike
+      kind: rate
+      type: spike
+      target: consumer_demand.tinctures
+      window: { start: 2025-09-08, end: 2025-09-21 }
+      magnitude: 1.6
+    - name: pos_feed_outage
+      kind: dq
+      type: volume_dropout
+      target: pos.scan_sales
+      window: { start: 2025-01-27, end: 2025-02-02 }
+      magnitude: 0.25
+    - name: shipments_loading_delay
+      kind: dq
+      type: loading_delay
+      target: erp.shipments
+      window: { start: 2025-07-14, end: 2025-07-15 }
+      magnitude: 8.0
+    - name: shipments_dupes
+      kind: dq
+      type: duplicate_rows
+      target: erp.shipments
+      window: { start: 2025-11-17, end: 2025-11-18 }
+      magnitude: 0.5
+  surprise:
+    count: 2
+    kinds: [rate, dq]
+    # Transient types only (ramp/trend_change persist to the timeline end).
+    types: [spike, drop, level_shift, volume_dropout, null_spike, distribution_shift, loading_delay, duplicate_rows]
+    magnitude: { min: 0.5, max: 0.8 }
+    min_gap_days: 21
+    exclude_windows:
+      - { start: 2024-10-01, end: 2024-12-07 }  # keep the fall stories clean

@@ -1,0 +1,57 @@
+version: 2
+
+sources:
+  - name: ad_platform
+    schema: ad_platform
+    tables:
+      - name: ad_spend
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 72, period: hour }
+          error_after: { count: 168, period: hour }
+        columns:
+          - name: spend_id
+            tests: [not_null]
+
+  - name: erp
+    schema: erp
+    tables:
+      - name: accounts
+        loaded_at_field: _loaded_at
+        columns:
+          - name: account_id
+            tests: [not_null]
+      - name: products
+        loaded_at_field: _loaded_at
+        columns:
+          - name: product_id
+            tests: [not_null]
+      - name: shipments
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 96, period: hour }
+          error_after: { count: 240, period: hour }
+        columns:
+          - name: shipment_id
+            tests: [not_null]
+
+  - name: pos
+    schema: pos
+    tables:
+      - name: scan_sales
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: { count: 240, period: hour }
+          error_after: { count: 400, period: hour }
+        columns:
+          - name: scan_id
+            tests: [not_null]
+
+  - name: promo
+    schema: promo
+    tables:
+      - name: trade_promotions
+        loaded_at_field: _loaded_at
+        columns:
+          - name: promo_id
+            tests: [not_null]

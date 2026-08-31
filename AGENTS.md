@@ -15,8 +15,10 @@ split). Read them before nontrivial changes.
 writes raw source tables plus `meta.ground_truth` / `meta.run_manifest`, and
 optionally Parquet/CSV exports. Which tables depends on the scenario's **vertical**
 (`company.vertical` in the YAML): `b2c_saas` (acme, white_cube — schemas ad_platform,
-web, app_db, billing, product) or `retail_dtc` (alpenglow — ad_platform, web, shop_db,
-fulfillment, payments). The companion dbt project in `dbt/<vertical>/` (dbt-duckdb)
+web, app_db, billing, product), `retail_dtc` (alpenglow — ad_platform, web, shop_db,
+fulfillment, payments), `b2b_services` (meridian — crm, billing; no web layer), or
+`cpg_wholesale` (bristlecone — ad_platform, erp, pos, promo; weekly POS feed, and
+marketing deliberately decoupled from sales). The companion dbt project in `dbt/<vertical>/` (dbt-duckdb)
 models them: staging → marts → MetricFlow semantic layer. Consumers fetch daily metric
 series via `mf query --metrics <m> --group-by metric_time__day --csv` (Breakdown's
 exact path; Tremor KPI mode too) — the one contract identical across verticals. Tremor
@@ -38,8 +40,10 @@ from `company.vertical` by the registry in `verticals/__init__.py`):
 2. Entity simulation — raw rows drawn stochastically from the latent rates, all
    vectorized. Vertical-owned (`verticals/<name>/entities/`): b2c_saas does
    sessions→signups→trials→subscriptions→billing→usage; retail_dtc does
-   sessions→orders→baskets→shipments→returns→payments. Shared builders any web
-   vertical reuses (ad_spend, sessions) live in `src/fake_companies/shared/`.
+   sessions→orders→baskets→shipments→returns→payments; b2b_services does
+   leads→stage machine→contracts→invoices; cpg_wholesale does weekly POS scans→
+   replenishment shipments (lagged). Shared builders any web vertical reuses
+   (ad_spend, sessions) live in `src/fake_companies/shared/`.
    Never write aggregates directly — aggregate realism must emerge from raw rows
    (e.g. AOV is not a driver; it emerges from baskets × prices).
 3. `src/fake_companies/corruption/` — observation layer: `_loaded_at` connector models
@@ -82,10 +86,12 @@ Every injected anomaly (rate or dq, scripted or surprise-sampled) emits a
   and is immune).
 - `uv run fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb`
 - `uv run fake-companies generate --config configs/alpenglow_retail_dtc.yaml --out out/alpenglow.duckdb`
+  (likewise meridian_b2b_services.yaml → out/meridian.duckdb, bristlecone_cpg.yaml →
+  out/bristlecone.duckdb)
 - `uv run pytest` (`-m "not slow"` for quick loop; slow = statistical + golden suite)
 - `uv run ruff check . && uv run ruff format .` (line length 100)
-- dbt: `cd dbt/<vertical> && dbt build` (profile reads `FAKE_DB` env var; defaults are
-  `../../out/acme.duckdb` for b2c_saas, `../../out/alpenglow.duckdb` for retail_dtc)
+- dbt: `cd dbt/<vertical> && dbt build` (profile reads `FAKE_DB` env var; each project
+  defaults to its demo database under `../../out/`)
 - Semantic layer: `mf validate-configs`, then e.g.
   `mf query --metrics mrr --group-by metric_time__day --csv /tmp/mrr.csv` (b2c_saas)
   or `--metrics net_revenue` (retail_dtc)
@@ -95,7 +101,7 @@ Every injected anomaly (rate or dq, scripted or surprise-sampled) emits a
 ## Testing conventions
 
 Statistical tests assert tolerances (Poisson/binomial CIs), never exact values.
-Determinism tests compare parquet hashes across two runs (both smoke configs).
+Determinism tests compare parquet hashes across two runs (every vertical's smoke config).
 Ground-truth honesty tests recompute each injected anomaly's affected aggregate and
 require ≥ ~3 robust sigmas vs clean windows (smoke configs run anomalies hotter than
 demo configs so these have power). Vertical-agnostic suites live at `tests/` top

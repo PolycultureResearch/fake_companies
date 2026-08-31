@@ -31,6 +31,7 @@ _available = importlib.util.find_spec("dbt") is not None and MF.exists() and DBT
         ("smoke_90d", "b2c_saas"),
         ("smoke_retail_90d", "retail_dtc"),
         ("smoke_b2b_90d", "b2b_services"),
+        ("smoke_cpg_90d", "cpg_wholesale"),
     ],
 )
 def test_consumer_contracts(config_name, vertical, tmp_path):

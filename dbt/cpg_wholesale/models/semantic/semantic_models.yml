@@ -1,0 +1,109 @@
+version: 2
+
+semantic_models:
+
+  # ----------------------------------------------------------------------- #
+  # Brand marketing (causally decoupled from sales)
+  # ----------------------------------------------------------------------- #
+  - name: ad_spend
+    description: Daily brand ad spend by channel.
+    model: ref('stg_ad_spend')
+    defaults:
+      agg_time_dimension: spend_date
+    entities:
+      - name: spend
+        type: primary
+        expr: spend_id
+    dimensions:
+      - name: spend_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: channel
+        type: categorical
+    measures:
+      - name: marketing_spend
+        description: Total brand ad spend.
+        agg: sum
+        expr: spend
+
+  # ----------------------------------------------------------------------- #
+  # Wholesale shipments (revenue)
+  # ----------------------------------------------------------------------- #
+  - name: shipments
+    description: Wholesale shipment lines to retailers and distributors.
+    model: ref('fct_shipments')
+    defaults:
+      agg_time_dimension: shipped_date
+    entities:
+      - name: shipment
+        type: primary
+        expr: shipment_id
+      - name: account
+        type: foreign
+        expr: account_id
+      - name: product
+        type: foreign
+        expr: product_id
+    dimensions:
+      - name: shipped_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: category
+        type: categorical
+      - name: channel_type
+        type: categorical
+    measures:
+      - name: shipped_cases
+        description: Wholesale cases shipped.
+        agg: sum
+        expr: cases
+      - name: wholesale_gross_revenue
+        description: Shipment value at list case price.
+        agg: sum
+        expr: gross_amount
+      - name: trade_spend
+        description: Off-invoice trade-promotion discounts granted.
+        agg: sum
+        expr: discount_amount
+      - name: wholesale_net_revenue
+        description: Shipment value net of trade discounts.
+        agg: sum
+        expr: net_amount
+
+  # ----------------------------------------------------------------------- #
+  # Consumer sell-through (weekly POS)
+  # ----------------------------------------------------------------------- #
+  - name: scan_sales
+    description: Weekly retailer POS scans, keyed to the week_start day.
+    model: ref('fct_scan_sales')
+    defaults:
+      agg_time_dimension: week_start
+    entities:
+      - name: scan
+        type: primary
+        expr: scan_id
+      - name: product
+        type: foreign
+        expr: product_id
+    dimensions:
+      - name: week_start
+        type: time
+        type_params:
+          time_granularity: day
+      - name: retailer_banner
+        type: categorical
+      - name: channel_type
+        type: categorical
+      - name: category
+        type: categorical
+    measures:
+      - name: pos_units
+        description: Consumer units scanned at retail.
+        agg: sum
+        expr: units
+      - name: pos_dollars
+        description: Consumer retail dollars scanned.
+        agg: sum
+        expr: dollars

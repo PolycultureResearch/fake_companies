@@ -1,0 +1,63 @@
+# Breakdown metric tree for the Bristlecone (cpg_wholesale) scenario.
+#
+# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
+#   mf query --metrics <name> --group-by metric_time__day --csv
+# run inside the CPG dbt project (`provider.project_path`).
+#
+# The causal graph is the point of this scenario: consumer POS drives
+# wholesale shipments with a replenishment lag, and marketing_spend is a
+# deliberately DISCONNECTED node — the generator couples it to nothing, so an
+# RCA tool that attributes a revenue move to the brand_budget_cut anomaly is
+# wrong, and one that finds no edge is right.
+provider:
+  type: local
+  project_path: "../dbt/cpg_wholesale" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+
+metrics:
+  - name: marketing_spend
+    description: Brand ad spend. Deliberately edge-free (decoupled from sales).
+    seasonality:
+      - { period: 7, name: weekly }
+
+  - name: pos_units
+    description: Consumer units scanned at retail (weekly grain, week_start-keyed).
+    seasonality:
+      - { period: 365, name: annual } # deep-winter cold-and-flu peak
+
+  - name: pos_dollars
+    description: Consumer retail dollars scanned.
+    parents: [pos_units]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 6.5, sigma: 1.5 } # ~retail price per unit
+
+  - name: shipped_cases
+    description: Wholesale cases shipped (replenishment lags POS by ~1-2 weeks).
+    parents: [pos_units]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.13, sigma: 0.04 } # ~1/case_size with ordering noise
+
+  - name: wholesale_gross_revenue
+    description: Shipment value at list case prices.
+    parents: [shipped_cases]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 33.0, sigma: 8.0 } # ~average case price
+
+  - name: trade_spend
+    description: Off-invoice trade discounts (promo calendar).
+    parents: [wholesale_gross_revenue]
+    priors:
+      coefficient:
+        distribution: Normal
+        params: { mu: 0.03, sigma: 0.02 } # trade share of gross
+
+  # Revenue identity: net = gross - trade spend (deterministic node).
+  - name: wholesale_net_revenue
+    description: Wholesale revenue net of trade discounts (the topline).
+    parents: [wholesale_gross_revenue, trade_spend]
+    formula: "wholesale_gross_revenue - trade_spend"

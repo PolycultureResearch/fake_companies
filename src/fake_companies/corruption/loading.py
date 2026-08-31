@@ -89,6 +89,11 @@ def apply_loading(
         if src.cadence == "daily":
             next_morning = ref.dt.normalize() + pd.Timedelta(days=1) + pd.Timedelta(hours=6)
             loaded = next_morning + lag
+        elif src.cadence == "weekly":
+            # Weekly feeds (retailer POS): rows for a week land the morning
+            # after the week ends. The event reference is the period start.
+            week_after = ref.dt.normalize() + pd.Timedelta(days=7) + pd.Timedelta(hours=8)
+            loaded = week_after + lag
         elif src.cadence == "micro_batch" and src.batch_minutes:
             midnight = ref.dt.normalize()
             steps = np.ceil((ref - midnight) / pd.Timedelta(minutes=src.batch_minutes))
