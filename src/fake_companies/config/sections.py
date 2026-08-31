@@ -38,6 +38,9 @@ class TrafficConfig(_Base):
     channels: dict[str, SessionChannel]
     duration_seconds_mean: float = 180.0
     page_views_mean: float = 4.0
+    # Landing-page pool for sessions; None keeps the built-in default (which the
+    # pre-split generator hardcoded, so existing scenarios stay byte-identical).
+    landing_pages: list[str] | None = None
 
 
 class MixConfig(_Base):

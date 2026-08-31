@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
+
+import pytest
 
 from fake_companies.config import load_config
 from fake_companies.generate import run_generation
@@ -15,8 +18,12 @@ def _sha(path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_parquet_byte_identical(smoke_config_path, tmp_path):
-    cfg = load_config(smoke_config_path)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("config_name", ["smoke_90d", "smoke_retail_90d"])
+def test_parquet_byte_identical(config_name, tmp_path):
+    cfg = load_config(REPO_ROOT / "configs" / f"{config_name}.yaml")
 
     db1 = tmp_path / "a.duckdb"
     db2 = tmp_path / "b.duckdb"

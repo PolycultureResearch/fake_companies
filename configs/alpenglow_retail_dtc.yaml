@@ -1,0 +1,246 @@
+# Alpenglow Supply Co. — outdoor/lifestyle apparel DTC brand (retail_dtc demo
+# scenario). Two years spanning two holiday seasons; four scripted rate
+# anomalies with clean demo stories, three dq events, and two surprises.
+#
+# Demo stories:
+#   1. mobile_checkout_bug      — a checkout release regresses paid_search mobile
+#                                 conversion for 12 days (segmented; topline-invisible)
+#   2. jackets_sizing_recall    — fall jacket run sized small: returns x2.2 for 5 weeks,
+#                                 surfacing with the delivery+request lag
+#   3. paid_social_budget_cut   — marketing halves paid_social spend for 3 weeks;
+#                                 cascades spend -> sessions -> orders -> revenue
+#   4. tees_demand_slump        — tees demand drops 30% for 2 weeks (category mix shift;
+#                                 units/revenue dip concentrated in one category)
+company:
+  name: Alpenglow Supply Co.
+  slug: alpenglow
+  vertical: retail_dtc
+  currency: USD
+  industry: retail_dtc
+
+seed: 42
+
+timeline:
+  start: 2024-06-01
+  days: 730
+
+calendar:
+  holiday_country: US
+  holiday_effect: 1.40
+  annual_amp: 0.25
+  annual_peak_doy: 332  # holiday-season peak (late November)
+
+# Retail weekends run hot; midweek is quiet.
+weekly_shape: [0.94, 0.90, 0.92, 0.97, 1.06, 1.14, 1.07]
+
+noise:
+  day_sigma: 0.07
+  ar1: 0.35
+
+traffic:
+  duration_seconds_mean: 160
+  page_views_mean: 5.5
+  landing_pages:
+    ["/", "/collections/new", "/collections/sale", "/collections/jackets", "/products", "/story"]
+  channels:
+    organic:
+      kind: organic
+      baseline: 1800
+      growth: { kind: linear, rate: 0.0012 }
+    paid_search:
+      kind: paid
+      spend_baseline: 1100
+      spend_growth: { kind: linear, rate: 0.0008 }
+      cpc: 1.25
+    paid_social:
+      kind: paid
+      spend_baseline: 1400
+      spend_growth: { kind: linear, rate: 0.0010 }
+      cpc: 0.75
+    email:
+      kind: fixed
+      baseline: 500
+      growth: { kind: linear, rate: 0.0015 }
+    direct:
+      kind: fixed
+      baseline: 700
+      growth: { kind: linear, rate: 0.0010 }
+
+mix:
+  country: { US: 0.72, CA: 0.13, GB: 0.09, DE: 0.06 }
+  device: { desktop: 0.34, mobile: 0.56, tablet: 0.10 }
+
+catalog:
+  categories:
+    tees:
+      n_skus: 36
+      price_min: 26
+      price_max: 44
+      unit_cost_ratio: 0.34
+      popularity: 1.7
+    hoodies:
+      n_skus: 20
+      price_min: 68
+      price_max: 98
+      unit_cost_ratio: 0.40
+      popularity: 1.1
+    jackets:
+      n_skus: 16
+      price_min: 140
+      price_max: 280
+      unit_cost_ratio: 0.48
+      popularity: 0.75
+    pants:
+      n_skus: 22
+      price_min: 72
+      price_max: 128
+      unit_cost_ratio: 0.42
+      popularity: 1.0
+    shorts:
+      n_skus: 14
+      price_min: 48
+      price_max: 68
+      unit_cost_ratio: 0.38
+      popularity: 0.7
+    hats:
+      n_skus: 12
+      price_min: 24
+      price_max: 40
+      unit_cost_ratio: 0.30
+      popularity: 0.85
+      sizes: [os]
+    socks:
+      n_skus: 10
+      price_min: 14
+      price_max: 24
+      unit_cost_ratio: 0.32
+      popularity: 0.9
+      sizes: [s_m, l_xl]
+
+conversion:
+  order_rate:
+    organic: 0.015
+    paid_search: 0.024
+    paid_social: 0.012
+    email: 0.038
+    direct: 0.020
+  order_rate_default: 0.012
+  device_multipliers: { desktop: 1.18, mobile: 0.88, tablet: 1.02 }
+
+basket:
+  items_per_order_mean: 1.75
+  extra_quantity_rate: 0.13
+  free_shipping_threshold: 75
+  shipping_fee: 6.95
+
+repeat:
+  monthly_repeat_rate: 0.12
+  frailty_sigma: 0.75
+  channel_mix: { email: 0.48, direct: 0.32, organic: 0.20 }
+
+returns:
+  rate:
+    tees: 0.05
+    hoodies: 0.07
+    jackets: 0.09
+    pants: 0.12
+    shorts: 0.08
+    hats: 0.02
+    socks: 0.015
+  rate_default: 0.06
+  request_delay_days_mean: 9.0
+  request_delay_sigma: 0.6
+  processing_days_mean: 4.0
+  processing_sigma: 0.4
+
+fulfillment:
+  handling_days_mean: 1.3
+  handling_sigma: 0.5
+  transit_days_mean: 3.6
+  transit_sigma: 0.4
+
+payments:
+  failure_rate: 0.022
+
+promos:
+  - code: SOLSTICE20
+    window: { start: 2024-06-20, end: 2024-06-24 }
+    discount_pct: 0.20
+    uptake: 0.35
+  - code: BLACKFRIDAY25
+    window: { start: 2024-11-29, end: 2024-12-02 }
+    discount_pct: 0.25
+    uptake: 0.55
+  - code: SPRING15
+    window: { start: 2025-04-10, end: 2025-04-17 }
+    discount_pct: 0.15
+    uptake: 0.30
+  - code: BLACKFRIDAY25
+    window: { start: 2025-11-28, end: 2025-12-01 }
+    discount_pct: 0.25
+    uptake: 0.55
+
+loading:
+  sources:
+    ad_platform: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+    web: { cadence: micro_batch, batch_minutes: 15, lag_median_minutes: 5, lag_sigma: 0.5 }
+    shop_db: { cadence: micro_batch, batch_minutes: 30, lag_median_minutes: 8, lag_sigma: 0.4 }
+    fulfillment: { cadence: hourly, lag_median_minutes: 25, lag_sigma: 0.5 }
+    payments: { cadence: micro_batch, batch_minutes: 30, lag_median_minutes: 3, lag_sigma: 0.4 }
+
+anomalies:
+  scripted:
+    - name: mobile_checkout_bug
+      kind: rate
+      type: drop
+      target: conversion_rate.paid_search
+      segment: { device: mobile }
+      window: { start: 2024-09-12, end: 2024-09-23 }
+      magnitude: 0.55
+    - name: jackets_sizing_recall
+      kind: rate
+      type: level_shift
+      target: return_rate.jackets
+      window: { start: 2024-10-07, end: 2024-11-10 }
+      magnitude: 2.2
+    - name: paid_social_budget_cut
+      kind: rate
+      type: level_shift
+      target: spend.paid_social
+      window: { start: 2025-02-03, end: 2025-02-23 }
+      magnitude: 0.5
+    - name: tees_demand_slump
+      kind: rate
+      type: drop
+      target: category_demand.tees
+      window: { start: 2025-05-05, end: 2025-05-18 }
+      magnitude: 0.7
+    - name: orders_pipeline_dupes
+      kind: dq
+      type: duplicate_rows
+      target: shop_db.orders
+      window: { start: 2025-01-21, end: 2025-01-22 }
+      magnitude: 0.5
+    - name: payments_loading_delay
+      kind: dq
+      type: loading_delay
+      target: payments.transactions
+      window: { start: 2025-03-17, end: 2025-03-18 }
+      magnitude: 8.0
+    - name: orders_session_id_nulls
+      kind: dq
+      type: null_spike
+      target: shop_db.orders
+      window: { start: 2025-06-09, end: 2025-06-12 }
+      magnitude: 0.6
+      params: { column: session_id }
+  surprise:
+    count: 2
+    kinds: [rate, dq]
+    # Transient types only: ramp/trend_change persist to the end of the
+    # timeline, which overwhelms a demo dataset when surprise-sampled.
+    types: [spike, drop, level_shift, volume_dropout, null_spike, distribution_shift, loading_delay, duplicate_rows]
+    magnitude: { min: 0.5, max: 0.8 }
+    min_gap_days: 21
+    exclude_windows:
+      - { start: 2024-09-01, end: 2024-11-30 }  # keep the scripted fall stories clean
