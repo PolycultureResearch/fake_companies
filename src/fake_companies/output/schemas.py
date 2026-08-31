@@ -1,9 +1,14 @@
-"""Central registry of raw source-table schemas.
+"""Table-spec contract + the vertical-independent meta tables.
 
-This is the contract shared by the entity generators (which produce the frames),
-the DuckDB writer (which enforces column order/types), and the dbt staging models
-(which read them). Every raw table carries a ``_loaded_at`` column; tables Tremor
-profiles in dataflow mode additionally declare an ``event_time`` column.
+A :class:`TableSpec` is the contract shared by the entity generators (which
+produce the frames), the DuckDB writer (which enforces column order/types), the
+loading model (which anchors ``_loaded_at`` on ``loading_ref``), and the dbt
+staging models (which read them). Every raw table carries a ``_loaded_at``
+column; tables Tremor profiles in dataflow mode additionally declare an
+``event_time`` column.
+
+Raw-table specs are vertical-owned — see ``fake_companies.verticals.<name>.tables``.
+Only the meta tables (ground truth, run manifest) live here.
 """
 
 from __future__ import annotations
@@ -19,6 +24,12 @@ class TableSpec:
     pk: str | None = None
     event_time: str | None = None  # business event time (Tremor dataflow bucketing)
     loaded_at: str = "_loaded_at"
+    # Loading anchor: the column (or coalesce chain of columns) whose timestamp
+    # the connector model treats as the row's business event. Falls back to
+    # ``event_time``. ``reference_data=True`` means the table is slowly-changing
+    # reference data anchored at a single nominal timestamp instead.
+    loading_ref: str | tuple[str, ...] | None = None
+    reference_data: bool = False
     tags: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -31,168 +42,7 @@ class TableSpec:
 
 
 # --------------------------------------------------------------------------- #
-# Raw source tables
-# --------------------------------------------------------------------------- #
-AD_SPEND = TableSpec(
-    schema="ad_platform",
-    name="ad_spend",
-    pk="spend_id",
-    loaded_at="_loaded_at",
-    columns={
-        "spend_id": "BIGINT",
-        "date": "DATE",
-        "channel": "VARCHAR",
-        "campaign_id": "VARCHAR",
-        "impressions": "BIGINT",
-        "clicks": "BIGINT",
-        "spend": "DOUBLE",
-        "currency": "VARCHAR",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-SESSIONS = TableSpec(
-    schema="web",
-    name="sessions",
-    pk="session_id",
-    event_time="started_at",
-    columns={
-        "session_id": "BIGINT",
-        "anonymous_id": "VARCHAR",
-        "user_id": "BIGINT",  # nullable
-        "channel": "VARCHAR",
-        "utm_campaign": "VARCHAR",  # nullable
-        "country": "VARCHAR",
-        "device": "VARCHAR",
-        "started_at": "TIMESTAMP",
-        "duration_seconds": "INTEGER",
-        "page_views": "INTEGER",
-        "landing_page": "VARCHAR",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-USERS = TableSpec(
-    schema="app_db",
-    name="users",
-    pk="user_id",
-    columns={
-        "user_id": "BIGINT",
-        "email": "VARCHAR",
-        "full_name": "VARCHAR",
-        "country": "VARCHAR",
-        "signup_channel": "VARCHAR",
-        "device_at_signup": "VARCHAR",
-        "created_at": "TIMESTAMP",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-PLANS = TableSpec(
-    schema="app_db",
-    name="plans",
-    pk="plan_id",
-    columns={
-        "plan_id": "BIGINT",
-        "name": "VARCHAR",
-        "billing_period": "VARCHAR",
-        "price": "DOUBLE",
-        "currency": "VARCHAR",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-SUBSCRIPTIONS = TableSpec(
-    schema="app_db",
-    name="subscriptions",
-    pk="subscription_id",
-    columns={
-        "subscription_id": "BIGINT",
-        "user_id": "BIGINT",
-        "plan_id": "BIGINT",
-        "status": "VARCHAR",  # trialing | active | past_due | canceled
-        "trial_start_at": "TIMESTAMP",
-        "trial_end_at": "TIMESTAMP",
-        "started_at": "TIMESTAMP",  # paid start (nullable)
-        "canceled_at": "TIMESTAMP",  # nullable
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-SUBSCRIPTION_EVENTS = TableSpec(
-    schema="app_db",
-    name="subscription_events",
-    pk="event_id",
-    event_time="occurred_at",
-    columns={
-        "event_id": "BIGINT",
-        "subscription_id": "BIGINT",
-        "user_id": "BIGINT",
-        "event_type": "VARCHAR",
-        "from_plan_id": "BIGINT",  # nullable
-        "to_plan_id": "BIGINT",  # nullable
-        "occurred_at": "TIMESTAMP",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-INVOICES = TableSpec(
-    schema="billing",
-    name="invoices",
-    pk="invoice_id",
-    event_time="issued_at",
-    columns={
-        "invoice_id": "BIGINT",
-        "subscription_id": "BIGINT",
-        "user_id": "BIGINT",
-        "amount": "DOUBLE",
-        "currency": "VARCHAR",
-        "period_start": "DATE",
-        "period_end": "DATE",
-        "status": "VARCHAR",  # paid | open | void | uncollectible
-        "issued_at": "TIMESTAMP",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-PAYMENTS = TableSpec(
-    schema="billing",
-    name="payments",
-    pk="payment_id",
-    event_time="created_at",
-    columns={
-        "payment_id": "BIGINT",
-        "invoice_id": "BIGINT",
-        "user_id": "BIGINT",
-        "amount": "DOUBLE",
-        "currency": "VARCHAR",
-        "payment_method": "VARCHAR",
-        "status": "VARCHAR",  # succeeded | failed
-        "failure_code": "VARCHAR",  # nullable
-        "created_at": "TIMESTAMP",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-PRODUCT_EVENTS = TableSpec(
-    schema="product",
-    name="events",
-    pk="event_id",
-    event_time="occurred_at",
-    columns={
-        "event_id": "BIGINT",
-        "user_id": "BIGINT",
-        "event_name": "VARCHAR",
-        "plan_at_event": "VARCHAR",
-        "country": "VARCHAR",
-        "device": "VARCHAR",
-        "occurred_at": "TIMESTAMP",
-        "_loaded_at": "TIMESTAMP",
-    },
-)
-
-# --------------------------------------------------------------------------- #
-# Meta tables
+# Meta tables (identical for every vertical)
 # --------------------------------------------------------------------------- #
 GROUND_TRUTH = TableSpec(
     schema="meta",
@@ -225,20 +75,4 @@ RUN_MANIFEST = TableSpec(
     },
 )
 
-RAW_TABLES: list[TableSpec] = [
-    AD_SPEND,
-    SESSIONS,
-    USERS,
-    PLANS,
-    SUBSCRIPTIONS,
-    SUBSCRIPTION_EVENTS,
-    INVOICES,
-    PAYMENTS,
-    PRODUCT_EVENTS,
-]
-
 META_TABLES: list[TableSpec] = [GROUND_TRUTH, RUN_MANIFEST]
-
-ALL_TABLES: list[TableSpec] = RAW_TABLES + META_TABLES
-
-BY_FQN: dict[str, TableSpec] = {t.fqn: t for t in ALL_TABLES}

@@ -29,11 +29,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config import ScenarioConfig
-from ..core import RngHub
-from ..core.calendar import Calendar
-from ..latent import DriverPanel
-from ._util import (
+from ....core import RngHub
+from ....core.calendar import Calendar
+from ....latent import DriverPanel
+from ....shared._util import (
     USAGE_HOUR_WEIGHTS,
     active_day_mask,
     events_on_active_days,
@@ -41,6 +40,7 @@ from ._util import (
     sample_labels,
     timestamps_from_days,
 )
+from ..config import B2CSaaSScenarioConfig as ScenarioConfig
 from .plans import PlanIndex
 
 # Cap on the user-days materialized at once. A multi-year scenario has tens of

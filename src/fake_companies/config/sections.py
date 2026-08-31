@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from .schema import GrowthConfig, _Base
+from .schema import BaseScenarioConfig, GrowthConfig, _Base
 
 
 class SessionChannel(_Base):
@@ -43,3 +43,15 @@ class TrafficConfig(_Base):
 class MixConfig(_Base):
     country: dict[str, float]
     device: dict[str, float]
+
+
+class WebScenarioConfig(BaseScenarioConfig):
+    """Envelope for verticals with a web/marketing acquisition layer.
+
+    The shared traffic and marketing entity builders (``fake_companies.shared``)
+    are written against this: any vertical whose config subclasses it can reuse
+    them as-is.
+    """
+
+    traffic: TrafficConfig
+    mix: MixConfig

@@ -27,15 +27,17 @@ def apply_loading_and_dq(
     rng: RngHub,
     frames: dict[str, pd.DataFrame],
     resolved: list | None = None,
+    *,
+    tables: list,
 ) -> list[GroundTruthRecord]:
     """Apply the loading model, then the dq corruptions.
 
-    First fills ``_loaded_at`` on every raw frame present in ``frames``; then
-    applies each dq anomaly in ``resolved`` and returns the resulting ground
-    truth (one record per dq anomaly). ``resolved`` defaults to ``None`` so the
-    loading model still runs before the anomaly set has been wired in.
+    First fills ``_loaded_at`` on every raw frame present in ``frames`` (in the
+    order given by ``tables``, the vertical's raw specs); then applies each dq
+    anomaly in ``resolved`` and returns the resulting ground truth (one record
+    per dq anomaly).
     """
-    apply_loading(cfg, cal, rng, frames)
+    apply_loading(cfg, cal, rng, frames, tables)
     if not resolved:
         return []
-    return apply_dq(cfg, cal, rng, frames, resolved)
+    return apply_dq(cfg, cal, rng, frames, resolved, tables)

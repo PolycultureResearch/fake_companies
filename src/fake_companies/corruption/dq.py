@@ -22,35 +22,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..anomalies import affected_signals_for_dq, dq_anomalies
 from ..config.schema import BaseScenarioConfig
 from ..core import RngHub
 from ..core.calendar import Calendar
 from ..groundtruth import GroundTruthRecord
+from ..output.schemas import TableSpec
 from .loading import event_reference
-
-# ``anomalies.py`` is built in a sibling milestone; fall back to local copies of
-# the two pure helpers so this layer stands alone until it lands.
-try:  # pragma: no cover - exercised in the integrated build
-    from ..anomalies import affected_signals_for_dq, dq_anomalies
-except ImportError:  # pragma: no cover - worktree without anomalies.py yet
-
-    def dq_anomalies(resolved):  # type: ignore[no-redef]
-        return [r for r in resolved if r.spec.kind == "dq"]
-
-    def affected_signals_for_dq(atype: str, params: dict | None):  # type: ignore[no-redef]
-        col = (params or {}).get("column")
-        if atype == "volume_dropout":
-            return ["volume"]
-        if atype == "null_spike":
-            return [f"null_rate:{col}"] if col else ["null_rate"]
-        if atype == "distribution_shift":
-            return [f"distribution:{col}"] if col else ["distribution"]
-        if atype == "loading_delay":
-            return ["freshness"]
-        if atype == "duplicate_rows":
-            return ["volume", "pk_unique"]
-        return []
-
 
 __all__ = [
     "apply_dq",
@@ -63,9 +41,9 @@ __all__ = [
 ]
 
 
-def in_window_mask(df: pd.DataFrame, fqn: str, cal: Calendar, window) -> np.ndarray:
+def in_window_mask(df: pd.DataFrame, spec: TableSpec, cal: Calendar, window) -> np.ndarray:
     """Boolean mask of rows whose event day falls within ``window``."""
-    ref_day = event_reference(fqn, df, cal).dt.normalize()
+    ref_day = event_reference(spec, df, cal).dt.normalize()
     start = pd.Timestamp(window.start)
     end = pd.Timestamp(window.end if window.end is not None else window.start)
     return ((ref_day >= start) & (ref_day <= end)).to_numpy()
@@ -125,11 +103,11 @@ def distribution_shift(
 
 
 def loading_delay(
-    df: pd.DataFrame, mask: np.ndarray, magnitude: float, fqn: str, cal: Calendar
+    df: pd.DataFrame, mask: np.ndarray, magnitude: float, spec: TableSpec, cal: Calendar
 ) -> pd.DataFrame:
     """Multiply the freshness lag of in-window rows by ``magnitude``."""
     df = df.copy()
-    ref = event_reference(fqn, df, cal)
+    ref = event_reference(spec, df, cal)
     lag = pd.to_datetime(df["_loaded_at"]) - ref
     new_loaded = ref + lag * magnitude
     df["_loaded_at"] = pd.to_datetime(df["_loaded_at"]).where(~mask, new_loaded)
@@ -154,8 +132,10 @@ def apply_dq(
     rng: RngHub,
     frames: dict[str, pd.DataFrame],
     resolved: list,
+    tables: list[TableSpec],
 ) -> list[GroundTruthRecord]:
     """Apply every dq anomaly and return one GroundTruthRecord per anomaly."""
+    by_fqn = {t.fqn: t for t in tables}
     gen = rng.stream("dq")
     records: list[GroundTruthRecord] = []
     for r in dq_anomalies(resolved):
@@ -163,9 +143,10 @@ def apply_dq(
         fqn = spec.target
         params = dict(spec.params or {})
         df = frames.get(fqn)
+        table = by_fqn.get(fqn)
 
-        if df is not None and len(df):
-            mask = in_window_mask(df, fqn, cal, spec.window)
+        if df is not None and len(df) and table is not None:
+            mask = in_window_mask(df, table, cal, spec.window)
             if spec.type == "volume_dropout":
                 frames[fqn] = volume_dropout(df, mask, spec.magnitude, gen)
             elif spec.type == "null_spike":
@@ -173,7 +154,7 @@ def apply_dq(
             elif spec.type == "distribution_shift":
                 frames[fqn] = distribution_shift(df, mask, params, gen)
             elif spec.type == "loading_delay":
-                frames[fqn] = loading_delay(df, mask, spec.magnitude, fqn, cal)
+                frames[fqn] = loading_delay(df, mask, spec.magnitude, table, cal)
             elif spec.type == "duplicate_rows":
                 frames[fqn] = duplicate_rows(df, mask, spec.magnitude, gen)
 

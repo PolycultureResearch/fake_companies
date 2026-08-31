@@ -12,11 +12,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config import ScenarioConfig
-from ..core import RngHub
-from ..core.calendar import Calendar
-from ..latent import DriverPanel
-from ..latent.panel import driver_key
+from ....core import RngHub
+from ....core.calendar import Calendar
+from ....latent import DriverPanel
+from ....latent.panel import driver_key
+from ..config import B2CSaaSScenarioConfig as ScenarioConfig
 
 
 def _name_pools(seed_int: int) -> tuple[list[str], list[str]]:

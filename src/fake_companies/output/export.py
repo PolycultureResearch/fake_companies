@@ -11,10 +11,9 @@ from pathlib import Path
 
 import duckdb
 
-from .schemas import ALL_TABLES
-
 
 def export_tables(db_path: str | Path, out_dir: str | Path, fmt: str = "parquet") -> list[Path]:
+    """Export every base table found in the database (vertical-agnostic)."""
     if fmt not in ("parquet", "csv"):
         raise ValueError(f"unsupported export format {fmt!r}")
     out = Path(out_dir)
@@ -22,16 +21,21 @@ def export_tables(db_path: str | Path, out_dir: str | Path, fmt: str = "parquet"
     con = duckdb.connect(str(db_path), read_only=True)
     written: list[Path] = []
     try:
-        for spec in ALL_TABLES:
-            dest = out / f"{spec.schema}.{spec.name}.{fmt}"
+        tables = con.execute(
+            "SELECT table_schema, table_name FROM information_schema.tables "
+            "WHERE table_type = 'BASE TABLE' ORDER BY table_schema, table_name"
+        ).fetchall()
+        for schema, name in tables:
+            fqn = f"{schema}.{name}"
+            dest = out / f"{fqn}.{fmt}"
             if fmt == "parquet":
                 con.execute(
-                    f"COPY (SELECT * FROM {spec.fqn} ORDER BY 1) "
+                    f"COPY (SELECT * FROM {fqn} ORDER BY 1) "
                     f"TO '{dest}' (FORMAT PARQUET, COMPRESSION ZSTD)"
                 )
             else:
                 con.execute(
-                    f"COPY (SELECT * FROM {spec.fqn} ORDER BY 1) TO '{dest}' (FORMAT CSV, HEADER)"
+                    f"COPY (SELECT * FROM {fqn} ORDER BY 1) TO '{dest}' (FORMAT CSV, HEADER)"
                 )
             written.append(dest)
     finally:

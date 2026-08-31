@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config import ScenarioConfig
+from ..config.sections import WebScenarioConfig as ScenarioConfig
 from ..core import RngHub
 from ..core.calendar import Calendar
 from ..latent import DriverPanel

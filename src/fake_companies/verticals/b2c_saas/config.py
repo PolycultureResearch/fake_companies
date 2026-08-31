@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pydantic import model_validator
 
-from ...config.schema import BaseScenarioConfig, _Base, validate_segment_dims
-from ...config.sections import MixConfig, TrafficConfig
+from ...config.schema import _Base, validate_segment_dims
+from ...config.sections import WebScenarioConfig
 
 # Segment dimensions a SaaS rate anomaly (or per-segment override) may filter on.
 SEGMENT_DIMS = frozenset({"country", "device", "channel", "plan"})
@@ -71,9 +71,7 @@ class EngagementConfig(_Base):
     member_engagement_sigma_scale: float = 0.0
 
 
-class B2CSaaSScenarioConfig(BaseScenarioConfig):
-    traffic: TrafficConfig
-    mix: MixConfig
+class B2CSaaSScenarioConfig(WebScenarioConfig):
     funnel: FunnelConfig
     plans: PlansConfig
     lifecycle: LifecycleConfig
