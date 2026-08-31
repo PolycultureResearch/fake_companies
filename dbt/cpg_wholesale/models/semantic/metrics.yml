@@ -1,0 +1,80 @@
+version: 2
+
+metrics:
+
+  # --- Brand marketing (decoupled from sales by construction) --------------
+  - name: marketing_spend
+    description: Brand ad spend. Deliberately decoupled from sales in this
+      vertical — no sales metric should attribute to it.
+    type: simple
+    label: Marketing Spend
+    type_params:
+      measure:
+        name: marketing_spend
+        fill_nulls_with: 0
+
+  # --- Consumer sell-through (weekly POS, keyed to week_start day) ---------
+  - name: pos_units
+    description: Consumer units scanned at retail. Weekly-grain data — daily
+      series carry values on week_start days only; read at week grain.
+    type: simple
+    label: POS Units
+    type_params:
+      measure:
+        name: pos_units
+        fill_nulls_with: 0
+
+  - name: pos_dollars
+    description: Consumer retail dollars scanned (weekly grain, keyed to week_start).
+    type: simple
+    label: POS Dollars
+    type_params:
+      measure:
+        name: pos_dollars
+        fill_nulls_with: 0
+
+  # --- Wholesale (the company's revenue) ------------------------------------
+  - name: shipped_cases
+    description: Wholesale cases shipped to retailers and distributors.
+    type: simple
+    label: Shipped Cases
+    type_params:
+      measure:
+        name: shipped_cases
+        fill_nulls_with: 0
+
+  - name: wholesale_gross_revenue
+    description: Shipment value at list case prices.
+    type: simple
+    label: Wholesale Gross Revenue
+    type_params:
+      measure:
+        name: wholesale_gross_revenue
+        fill_nulls_with: 0
+
+  - name: trade_spend
+    description: Off-invoice trade-promotion discounts granted to retailers.
+    type: simple
+    label: Trade Spend
+    type_params:
+      measure:
+        name: trade_spend
+        fill_nulls_with: 0
+
+  - name: wholesale_net_revenue
+    description: Shipment value net of trade discounts — the topline. Follows
+      consumer POS with the replenishment lag (about one to two weeks).
+    type: simple
+    label: Wholesale Net Revenue
+    type_params:
+      measure:
+        name: wholesale_net_revenue
+        fill_nulls_with: 0
+
+  - name: avg_case_price
+    description: Realized net price per shipped case.
+    type: ratio
+    label: Avg Case Price
+    type_params:
+      numerator: wholesale_net_revenue
+      denominator: shipped_cases

@@ -35,6 +35,7 @@ EXAMPLES = {
     "b2c_saas": ("breakdown_acme_tree.yml", "tremor_acme.yaml"),
     "retail_dtc": ("breakdown_alpenglow_tree.yml", "tremor_alpenglow.yaml"),
     "b2b_services": ("breakdown_meridian_tree.yml", "tremor_meridian.yaml"),
+    "cpg_wholesale": ("breakdown_bristlecone_tree.yml", "tremor_bristlecone.yaml"),
 }
 
 

@@ -61,19 +61,13 @@ determinism tests catch regressions). Do it incrementally — one module per PR.
 > Deferred to retail v2: inventory/stockouts (approximate with a `category_demand`
 > drop for now) and promo tables (promos are config-only order stamps).
 >
-> Next verticals (sketches vetted against the protocol; no core changes expected):
-> - **b2b_services** (non-SaaS, sales-led): crm.accounts/contacts/deals/
->   deal_stage_events + billing.contracts/invoices/payments; drivers
->   `leads.<source>`, `stage_conversion.<stage>`, `deal_size`, `win_rate`,
->   `cycle_time_scale`; metrics pipeline_value, win_rate, cycle_time, bookings,
->   invoiced_revenue. No web/traffic sections (they're vertical-owned, so simply
->   omitted). The deal-stage machine reuses the monthly-hazard pattern.
-> - **cpg_wholesale** (Traditional-Medicinals-flavored): erp.accounts/shipments +
->   pos.scan_sales (weekly grain — `weekly` loading cadence already in the enum) +
->   promo.trade_promotions; ad_spend present but causally decoupled
->   (`affected_metrics("spend.<ch>") == ["marketing_spend"]` only). Promo -> POS
->   lift -> delayed distributor reorders is the same delayed-event pattern as
->   retail returns.
+> **b2b_services** and **cpg_wholesale** shipped too (Meridian Partners and
+> Bristlecone Botanicals), exactly per the sketches: the B2B vertical needed no
+> web sections (they're vertical-owned), the CPG vertical uses the `weekly`
+> loading cadence for POS and keeps `affected_metrics("spend.<ch>") ==
+> ["marketing_spend"]` — brand marketing causally decoupled from sales. No core
+> changes were required beyond a `weekly` branch in the loading model, which
+> validates the protocol seams.
 
 **Why.** The generator is a *B2C-SaaS* generator wearing a config. E-commerce
 (carts/orders/SKUs, no subscriptions) or B2B SaaS (accounts/seats, sales-led,

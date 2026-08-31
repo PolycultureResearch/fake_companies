@@ -1,0 +1,96 @@
+# Small 90-day CPG scenario for CI / quick test loops. Same shape as
+# bristlecone_cpg, smaller scale.
+company:
+  name: CPG Smoke
+  slug: cpg_smoke
+  vertical: cpg_wholesale
+  currency: USD
+  industry: cpg
+
+seed: 31
+
+timeline:
+  start: 2024-01-01
+  days: 90
+
+calendar:
+  holiday_country: US
+  holiday_effect: 1.1
+  annual_amp: 0.25
+  annual_peak_doy: 10  # herbal tea peaks in deep winter
+
+weekly_shape: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+noise:
+  day_sigma: 0.06
+  ar1: 0.3
+
+marketing:
+  channels:
+    paid_social:
+      spend_baseline: 400
+      growth: { kind: flat }
+      cpc: 0.9
+    paid_search:
+      spend_baseline: 250
+      growth: { kind: flat }
+      cpc: 1.4
+
+catalog:
+  categories:
+    teas:
+      n_products: 12
+      case_size: 6
+      case_price_min: 22
+      case_price_max: 30
+      popularity: 1.5
+    tinctures:
+      n_products: 6
+      case_size: 12
+      case_price_min: 60
+      case_price_max: 84
+      popularity: 0.8
+
+market:
+  retailers:
+    whole_earth: { channel_type: natural, stores: 180, velocity: 1.6 }
+    greenfields: { channel_type: grocery, stores: 600, velocity: 0.6 }
+    independents: { channel_type: independents, stores: 400, velocity: 0.5 }
+  distributors:
+    cascadia_naturals: { share: 0.6, region: west }
+    sunhaven: { share: 0.4, region: east }
+
+promos:
+  - name: new_year_wellness
+    banner: greenfields
+    category: teas
+    window: { start: 2024-01-08, end: 2024-01-21 }
+    discount_pct: 0.15
+    lift: 1.5
+
+ordering:
+  reorder_lag_days_mean: 4.0
+  order_noise_sigma: 0.15
+
+loading:
+  sources:
+    ad_platform: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+    erp: { cadence: micro_batch, batch_minutes: 60, lag_median_minutes: 15, lag_sigma: 0.4 }
+    pos: { cadence: weekly, lag_median_minutes: 720, lag_sigma: 0.4 }
+    promo: { cadence: daily, lag_median_minutes: 480, lag_sigma: 0.3 }
+
+anomalies:
+  scripted:
+    # Smoke anomalies run hotter than the demo config for honesty-test power.
+    - name: teas_demand_scare
+      kind: rate
+      type: drop
+      target: consumer_demand.teas
+      window: { start: 2024-02-05, end: 2024-02-18 }
+      magnitude: 0.5
+    - name: pos_feed_outage
+      kind: dq
+      type: volume_dropout
+      target: pos.scan_sales
+      window: { start: 2024-03-04, end: 2024-03-10 }
+      magnitude: 0.2
