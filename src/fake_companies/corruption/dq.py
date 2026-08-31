@@ -22,7 +22,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config.schema import ScenarioConfig
+from ..config.schema import BaseScenarioConfig
 from ..core import RngHub
 from ..core.calendar import Calendar
 from ..groundtruth import GroundTruthRecord
@@ -149,7 +149,7 @@ def duplicate_rows(
 # Dispatcher
 # --------------------------------------------------------------------------- #
 def apply_dq(
-    cfg: ScenarioConfig,
+    cfg: BaseScenarioConfig,
     cal: Calendar,
     rng: RngHub,
     frames: dict[str, pd.DataFrame],

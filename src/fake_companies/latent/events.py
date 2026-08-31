@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..config import ScenarioConfig
+from ..config import BaseScenarioConfig
 from ..config.schema import Window
 from ..core.calendar import Calendar
 from ..groundtruth import GroundTruthRecord
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 def apply_rate_events(
     panel: DriverPanel,
     resolved: list[ResolvedAnomaly],
-    cfg: ScenarioConfig,
+    cfg: BaseScenarioConfig,
     cal: Calendar,
 ) -> tuple[DriverPanel, list[GroundTruthRecord]]:
     # Imported lazily to avoid a latent<->anomalies import cycle.

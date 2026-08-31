@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..config.schema import ScenarioConfig, SourceLoading
+from ..config.schema import BaseScenarioConfig, SourceLoading
 from ..core import RngHub
 from ..core.calendar import Calendar
 from ..output.schemas import BY_FQN, RAW_TABLES
@@ -66,7 +66,7 @@ def _lag_minutes(
 
 
 def apply_loading(
-    cfg: ScenarioConfig,
+    cfg: BaseScenarioConfig,
     cal: Calendar,
     rng: RngHub,
     frames: dict[str, pd.DataFrame],

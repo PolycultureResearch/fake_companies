@@ -12,17 +12,18 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..config import ScenarioConfig, config_hash
+from ..config import BaseScenarioConfig, config_hash
 from ..groundtruth import GroundTruthRecord
 
 TOOL_VERSION = "0.1.0"
 
 
-def build_manifest(cfg: ScenarioConfig, seed: int, n_records: int) -> dict[str, str]:
+def build_manifest(cfg: BaseScenarioConfig, seed: int, n_records: int) -> dict[str, str]:
     return {
         "tool_version": TOOL_VERSION,
         "company": cfg.company.name,
         "company_slug": cfg.company.slug,
+        "vertical": cfg.company.vertical,
         "seed": str(seed),
         "config_hash": config_hash(cfg),
         "timeline_start": cfg.timeline.start.isoformat(),

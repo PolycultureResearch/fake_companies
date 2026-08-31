@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..config import ScenarioConfig
+from ..config import BaseScenarioConfig
 from ..core import RngHub
 from ..core.calendar import Calendar
 from ..groundtruth import GroundTruthRecord
@@ -22,7 +22,7 @@ __all__ = ["apply_loading_and_dq"]
 
 
 def apply_loading_and_dq(
-    cfg: ScenarioConfig,
+    cfg: BaseScenarioConfig,
     cal: Calendar,
     rng: RngHub,
     frames: dict[str, pd.DataFrame],
