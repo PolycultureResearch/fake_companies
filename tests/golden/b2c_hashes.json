@@ -7,7 +7,7 @@
     "app_db.users.parquet": "9ad46257641042f8485448f85ba4d61b9b9a67dd87567a4807eb8db76a88e4e4",
     "billing.invoices.parquet": "e553d555ec343dfcc88020becd63e3f00af013c3758ef7c8b7d35b3b7d258759",
     "billing.payments.parquet": "722be3aee7ff80c838a22c7e49e4afda64d27b8ec32e134e8402d8d8f5c256f1",
-    "meta.ground_truth.parquet": "5852fdd6a1d6b4777fef788c9015a2ebadb5ab04256bc4788db5a997cf3f9481",
+    "meta.ground_truth.parquet": "605e3a4784152da474dd2472970a6bc5bbd566a53010b61fa8baf9b6273908a8",
     "product.events.parquet": "4a2984206c970a24898f6d3a2ac440bd8da65f8ac6bc6387bcf3e48f6c7679d4",
     "web.sessions.parquet": "9ccbce9f672d238b108cfb17b96e8c4fabdcb174383808d96dd7c8ab690d23ed"
   },

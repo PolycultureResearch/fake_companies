@@ -55,6 +55,19 @@ def dq_anomalies(resolved: list[ResolvedAnomaly]) -> list[ResolvedAnomaly]:
 # --------------------------------------------------------------------------- #
 # Surprise sampling
 # --------------------------------------------------------------------------- #
+def _uniform(gen: np.random.Generator, lo: float, hi: float) -> float:
+    """Scalar uniform draw via Python arithmetic, NOT ``gen.uniform``.
+
+    numpy's ``Generator.uniform`` computes ``lo + (hi-lo)*u`` inside the wheel,
+    where fused-multiply-add contraction makes the last bits differ between
+    platform builds (observed: macOS arm64 vs Linux). CPython never emits FMA,
+    so this formulation is bit-identical everywhere, and it consumes exactly
+    one stream draw like ``uniform`` does — cross-platform byte-identical
+    output depends on it.
+    """
+    return lo + (hi - lo) * float(gen.random())
+
+
 def _sample_surprise(
     cfg: BaseScenarioConfig,
     cal: Calendar,
@@ -94,7 +107,7 @@ def _sample_surprise(
         if excluded[i0] or any(abs(i0 - t) < sc.min_gap_days for t in taken):
             continue
         start = cal.start + dt.timedelta(days=i0)
-        magnitude = float(gen.uniform(sc.magnitude.min, sc.magnitude.max))
+        magnitude = _uniform(gen, sc.magnitude.min, sc.magnitude.max)
         spec = _build_surprise_spec(
             kind, atype, start, magnitude, cal, gen, drivers, dq_tables, dq_meta
         )
@@ -141,7 +154,7 @@ def _build_surprise_spec(
             if not cols:
                 return None
             params["column"] = str(gen.choice(cols))
-            params["skew"] = float(gen.uniform(0.4, 0.8))  # concentrate onto one level
+            params["skew"] = _uniform(gen, 0.4, 0.8)  # concentrate onto one level
 
     # Clamp window to the timeline.
     if end is not None and end > cal.end:
