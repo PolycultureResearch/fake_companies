@@ -69,8 +69,8 @@ def test_pipeline_outage_drops_product_volume(smoke_run):
 
 @pytest.mark.slow
 def test_all_scripted_rate_anomalies_detectable():
-    """Acme: each scripted rate anomaly moves its primary affected aggregate."""
-    cfg = load_config("configs/acme_b2c_saas.yaml")
+    """Reference scenario: each scripted rate anomaly moves its primary affected aggregate."""
+    cfg = load_config("configs/reference_b2c_saas.yaml")
     r = generate(cfg)
     ad = r.frames["ad_platform.ad_spend"]
 

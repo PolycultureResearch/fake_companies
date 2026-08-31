@@ -17,7 +17,7 @@ app = typer.Typer(
 @app.command()
 def generate(
     config: Path = typer.Option(..., "--config", "-c", help="Scenario YAML path."),
-    out: Path = typer.Option("out/acme.duckdb", "--out", "-o", help="DuckDB output path."),
+    out: Path = typer.Option("out/company.duckdb", "--out", "-o", help="DuckDB output path."),
     seed: int | None = typer.Option(None, "--seed", help="Override the config seed."),
     dump_drivers: Path | None = typer.Option(
         None, "--dump-drivers", help="Write the latent driver panel to CSV for inspection."
@@ -41,7 +41,7 @@ def generate(
 
 @app.command()
 def export(
-    db: Path = typer.Option("out/acme.duckdb", "--db", help="DuckDB database path."),
+    db: Path = typer.Option("out/company.duckdb", "--db", help="DuckDB database path."),
     out: Path = typer.Option("out/export", "--out", "-o", help="Output directory."),
     fmt: str = typer.Option("parquet", "--format", help="parquet | csv"),
 ) -> None:
@@ -54,7 +54,7 @@ def export(
 
 @app.command()
 def truth(
-    db: Path = typer.Option("out/acme.duckdb", "--db", help="DuckDB database path."),
+    db: Path = typer.Option("out/company.duckdb", "--db", help="DuckDB database path."),
 ) -> None:
     """Print the ground-truth anomaly table."""
     import duckdb

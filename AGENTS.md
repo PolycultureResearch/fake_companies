@@ -14,7 +14,7 @@ split). Read them before nontrivial changes.
 `fake-companies generate --config configs/<scenario>.yaml --out out/<db>.duckdb`
 writes raw source tables plus `meta.ground_truth` / `meta.run_manifest`, and
 optionally Parquet/CSV exports. Which tables depends on the scenario's **vertical**
-(`company.vertical` in the YAML): `b2c_saas` (acme, white_cube — schemas ad_platform,
+(`company.vertical` in the YAML): `b2c_saas` (White Cube, plus a reference scenario — schemas ad_platform,
 web, app_db, billing, product), `retail_dtc` (alpenglow — ad_platform, web, shop_db,
 fulfillment, payments), `b2b_services` (meridian — crm, billing; no web layer), or
 `cpg_wholesale` (bristlecone — ad_platform, erp, pos, promo; weekly POS feed, and
@@ -84,14 +84,14 @@ Every injected anomaly (rate or dq, scripted or surprise-sampled) emits a
   of `fake_companies` break after a sync, `uv sync --reinstall-package fake-companies`
   (the editable install is flaky on this machine; pytest imports via `pythonpath=src`
   and is immune).
-- `uv run fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb`
+- `uv run fake-companies generate --config configs/white_cube_b2c_app.yaml --out out/white_cube.duckdb`
 - `uv run fake-companies generate --config configs/alpenglow_retail_dtc.yaml --out out/alpenglow.duckdb`
   (likewise meridian_b2b_services.yaml → out/meridian.duckdb, bristlecone_cpg.yaml →
   out/bristlecone.duckdb)
 - `uv run pytest` (`-m "not slow"` for quick loop; slow = statistical + golden suite)
 - `uv run ruff check . && uv run ruff format .` (line length 100)
 - dbt: `cd dbt/<vertical> && dbt build` (profile reads `FAKE_DB` env var; each project
-  defaults to its demo database under `../../out/`)
+  defaults to its demo database under `../../out/` (b2c_saas: white_cube))
 - Semantic layer: `mf validate-configs`, then e.g.
   `mf query --metrics mrr --group-by metric_time__day --csv /tmp/mrr.csv` (b2c_saas)
   or `--metrics net_revenue` (retail_dtc)

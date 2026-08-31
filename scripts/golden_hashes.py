@@ -22,7 +22,7 @@ from fake_companies.output.export import export_hashes
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_PATH = REPO_ROOT / "tests" / "golden" / "b2c_hashes.json"
-CONFIG_NAMES = ["acme_b2c_saas", "white_cube_b2c_app", "smoke_90d"]
+CONFIG_NAMES = ["reference_b2c_saas", "white_cube_b2c_app", "smoke_90d"]
 EXCLUDED = {"meta.run_manifest.parquet"}
 
 

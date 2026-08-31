@@ -1,4 +1,4 @@
-# Breakdown metric tree for the Acme scenario.
+# Breakdown metric tree for the White Cube (b2c_saas) scenario.
 #
 # Feeds Breakdown's LocalDataFetcher: each `name` is queried via
 #   mf query --metrics <name> --group-by metric_time__day --csv

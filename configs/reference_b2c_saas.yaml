@@ -1,8 +1,9 @@
-# Acme — canonical B2C SaaS scenario (freemium + trial → subscription).
+# Reference B2C SaaS scenario (freemium + trial → subscription) — the canonical
+# starting point to copy for a new b2c_saas company; White Cube is the demo company.
 # Everything here is validated 1:1 by config/schema.py:ScenarioConfig.
 company:
-  name: Acme
-  slug: acme
+  name: Reference B2C SaaS
+  slug: b2c_reference
   currency: USD
   industry: b2c_saas
 

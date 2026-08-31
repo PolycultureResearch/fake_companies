@@ -1,5 +1,5 @@
 {
-  "acme_b2c_saas": {
+  "reference_b2c_saas": {
     "ad_platform.ad_spend.parquet": "e5e95a82187e64425469f73875c052131dda6a5f0322b5ce7768d007f89295cb",
     "app_db.plans.parquet": "6427d4c9273e191876a80a56bd17ca750c9b5de0236a8f40ba289999642e5188",
     "app_db.subscription_events.parquet": "6d213fd6e60b72b22dea4f6752f35ecd7ff2266e6450a969cbab4c610c202dcd",

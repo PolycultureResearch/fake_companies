@@ -23,7 +23,7 @@ mode) fetch daily metric series via
 
 ## Point dbt at a database
 
-The DuckDB profile reads the `FAKE_DB` env var (default `../out/acme.duckdb`).
+The DuckDB profile reads the `FAKE_DB` env var (default `../../out/white_cube.duckdb`).
 dbt materializes its models into `main_staging` / `main_marts` schemas inside
 that same DuckDB file. Generate a database first:
 
@@ -32,7 +32,7 @@ that same DuckDB file. Generate a database first:
 uv sync --extra dbt
 .venv/bin/fake-companies generate --config configs/smoke_90d.yaml --out out/smoke.duckdb
 # or the full 2-year scenario:
-.venv/bin/fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb
+.venv/bin/fake-companies generate --config configs/white_cube_b2c_app.yaml --out out/white_cube.duckdb
 ```
 
 ## Build + test (M5 gate)

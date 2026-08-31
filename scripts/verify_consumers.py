@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """Verify the consumer contracts against a built database + dbt project.
 
-Breakdown: for every metric in ``examples/breakdown_acme_tree.yml`` run the exact
+Breakdown: for every metric in ``examples/breakdown_white_cube_tree.yml`` run the exact
 ``mf query --metrics M --group-by metric_time__day --csv`` LocalDataFetcher uses,
 and confirm a CSV with a ``metric_time__day`` column and a ``M`` column.
 
-Tremor: for every dataflow monitor in ``examples/tremor_acme.yaml`` confirm the
+Tremor: for every dataflow monitor in ``examples/tremor_white_cube.yaml`` confirm the
 raw relation exists in the DuckDB and exposes the event-time, ``_loaded_at``, PK,
 and signal columns the monitor references.
 
@@ -13,7 +13,7 @@ The dbt project and example files are picked from the database's
 ``meta.run_manifest.vertical`` (dbt/<vertical>/, examples per vertical).
 
 Usage (from repo root, with the dbt extra installed):
-    FAKE_DB=out/acme.duckdb python scripts/verify_consumers.py
+    FAKE_DB=out/white_cube.duckdb python scripts/verify_consumers.py
 Exits non-zero if any check fails.
 """
 
@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # vertical -> (breakdown tree, tremor config) under examples/
 EXAMPLES = {
-    "b2c_saas": ("breakdown_acme_tree.yml", "tremor_acme.yaml"),
+    "b2c_saas": ("breakdown_white_cube_tree.yml", "tremor_white_cube.yaml"),
     "retail_dtc": ("breakdown_alpenglow_tree.yml", "tremor_alpenglow.yaml"),
     "b2b_services": ("breakdown_meridian_tree.yml", "tremor_meridian.yaml"),
     "cpg_wholesale": ("breakdown_bristlecone_tree.yml", "tremor_bristlecone.yaml"),
@@ -40,7 +40,7 @@ EXAMPLES = {
 
 
 def _fake_db() -> Path:
-    return Path(os.environ.get("FAKE_DB", ROOT / "out" / "acme.duckdb")).resolve()
+    return Path(os.environ.get("FAKE_DB", ROOT / "out" / "white_cube.duckdb")).resolve()
 
 
 def verify_breakdown(

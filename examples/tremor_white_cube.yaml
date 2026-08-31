@@ -1,4 +1,4 @@
-# Tremor monitor config for the Acme scenario.
+# Tremor monitor config for the White Cube (b2c_saas) scenario.
 #
 # Tremor is early-stage/volatile, so this stays example-level and builds only on
 # the stable contract: (a) daily MetricFlow KPIs and (b) raw warehouse tables
@@ -6,12 +6,12 @@
 # layer (Breakdown's fetch path); dataflow monitors profile raw tables directly.
 #
 # Point connections at a generated database:
-#   fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb
-#   cd dbt && FAKE_DB=../out/acme.duckdb dbt build   # materialize marts + semantic
+#   fake-companies generate --config configs/white_cube_b2c_app.yaml --out out/white_cube.duckdb
+#   cd dbt/b2c_saas && FAKE_DB=../../out/white_cube.duckdb dbt build   # materialize marts + semantic
 connections:
   warehouse:
     dialect: duckdb
-    dsn: "${FAKE_DB:-out/acme.duckdb}"
+    dsn: "${FAKE_DB:-out/white_cube.duckdb}"
   metricflow:
     mode: cli
     project_dir: "./dbt/b2c_saas"

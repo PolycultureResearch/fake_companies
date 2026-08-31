@@ -21,9 +21,9 @@ Future work (other verticals, MCP server, config'able constants) is in
 
 ```bash
 uv sync
-uv run fake-companies generate --config configs/acme_b2c_saas.yaml --out out/acme.duckdb
-uv run fake-companies truth  --db out/acme.duckdb        # list injected anomalies
-uv run fake-companies export --db out/acme.duckdb --format parquet
+uv run fake-companies generate --config configs/white_cube_b2c_app.yaml --out out/white_cube.duckdb
+uv run fake-companies truth  --db out/white_cube.duckdb        # list injected anomalies
+uv run fake-companies export --db out/white_cube.duckdb --format parquet
 ```
 
 Model the raw tables with the companion dbt project and query metrics via
@@ -31,7 +31,7 @@ MetricFlow (this is Breakdown's exact fetch path):
 
 ```bash
 uv sync --extra dbt
-export DBT_PROFILES_DIR=$PWD/dbt FAKE_DB=$PWD/out/acme.duckdb
+export DBT_PROFILES_DIR=$PWD/dbt/b2c_saas FAKE_DB=$PWD/out/white_cube.duckdb
 uv run dbt build --project-dir dbt
 cd dbt && uv run mf validate-configs
 uv run mf query --metrics mrr --group-by metric_time__day --csv /tmp/mrr.csv
@@ -41,7 +41,7 @@ Verify both consumer contracts (Breakdown tree metrics + Tremor dataflow tables)
 end-to-end:
 
 ```bash
-FAKE_DB=out/acme.duckdb uv run python scripts/verify_consumers.py
+FAKE_DB=out/white_cube.duckdb uv run python scripts/verify_consumers.py
 ```
 
 ### Blind-testing a detector
@@ -56,7 +56,7 @@ uv run fake-companies score --truth ground_truth.json --events my_detector_event
 
 ## What you get
 
-The default `acme_b2c_saas.yaml` scenario (2 years, seed-deterministic) produces
+The `white_cube_b2c_app.yaml` demo scenario (2+ years, seed-deterministic) produces
 roughly:
 
 | table | rows | notes |
