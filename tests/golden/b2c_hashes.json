@@ -1,0 +1,38 @@
+{
+  "acme_b2c_saas": {
+    "ad_platform.ad_spend.parquet": "e5e95a82187e64425469f73875c052131dda6a5f0322b5ce7768d007f89295cb",
+    "app_db.plans.parquet": "6427d4c9273e191876a80a56bd17ca750c9b5de0236a8f40ba289999642e5188",
+    "app_db.subscription_events.parquet": "6d213fd6e60b72b22dea4f6752f35ecd7ff2266e6450a969cbab4c610c202dcd",
+    "app_db.subscriptions.parquet": "c5f4b31e7e984ba6b609467ad76d157b53b7b0acfd185cdd702825ea75fdfc88",
+    "app_db.users.parquet": "9ad46257641042f8485448f85ba4d61b9b9a67dd87567a4807eb8db76a88e4e4",
+    "billing.invoices.parquet": "e553d555ec343dfcc88020becd63e3f00af013c3758ef7c8b7d35b3b7d258759",
+    "billing.payments.parquet": "722be3aee7ff80c838a22c7e49e4afda64d27b8ec32e134e8402d8d8f5c256f1",
+    "meta.ground_truth.parquet": "5852fdd6a1d6b4777fef788c9015a2ebadb5ab04256bc4788db5a997cf3f9481",
+    "product.events.parquet": "4a2984206c970a24898f6d3a2ac440bd8da65f8ac6bc6387bcf3e48f6c7679d4",
+    "web.sessions.parquet": "9ccbce9f672d238b108cfb17b96e8c4fabdcb174383808d96dd7c8ab690d23ed"
+  },
+  "white_cube_b2c_app": {
+    "ad_platform.ad_spend.parquet": "cb7f3829bc1a716bfe61cda12b187d968e4a7824fbaf1040ade14990cbb35e0e",
+    "app_db.plans.parquet": "28231cfe412c2c7e0fcd129d914ff7cfe625a842b0263d152c0ce0249acf5152",
+    "app_db.subscription_events.parquet": "0ed623c0ee1dbad1918ea882eb473429473aacb76e31fcd3c23c746d630c2b41",
+    "app_db.subscriptions.parquet": "cf27d5e2e804c0a7db342caf47a5e1fc22097efa0d69646a4eb8fa0186330526",
+    "app_db.users.parquet": "046c309b3efe7b4545ffa0bd8dbc6fbf6be14708ba9a1980e0f7bc14e3b13296",
+    "billing.invoices.parquet": "2dea911edb49bd45460c46cc968df1971ea06e69c5ec4d3497c533238e137207",
+    "billing.payments.parquet": "11b6b88808833595399e49b8d9e6c41dedd839e001c31801b5faa894a8877389",
+    "meta.ground_truth.parquet": "f15f0a20291bf98262e349a3ee3891d0f418612685cbc257d9c8e6ec3581195d",
+    "product.events.parquet": "f1a7bfe9e92b0846223c5355be76f8c2a3e2f234ac0e3d092853f930f26a04b0",
+    "web.sessions.parquet": "6ba244912dea5baadd047b7b13d980b62b34700f6d0dd6ef79b68e956a80d9e1"
+  },
+  "smoke_90d": {
+    "ad_platform.ad_spend.parquet": "6b257c54bd8c3f8e9b940c025d58f4698d0a4ba416fa521da0e0ae720452d533",
+    "app_db.plans.parquet": "6c006f49260a5254eb4d9bfaa453826c3442bb9157f0a6037fd58761e0e7f108",
+    "app_db.subscription_events.parquet": "cfb14a7e8552edeaf50a59d16da4512360faa511aae07bd38d3fa3c4543ea032",
+    "app_db.subscriptions.parquet": "56c7d59a9168c078c913e0a0d08f0a9fce29665f8500897d9979e72ee72367e9",
+    "app_db.users.parquet": "ced4e39b7f45b28fcfe9c8f7a31477354060712e1805ffe6c499f22e478ed460",
+    "billing.invoices.parquet": "e84ad461b59841b42534474e042b03f3f3f4020084b99941ffdbcfbeb49cffec",
+    "billing.payments.parquet": "8c282307013862c0a5f5de5d7ba05944dbc448047d7fa56090c818b62c397d13",
+    "meta.ground_truth.parquet": "546c4de0b9f75a4e4d87c5162abe05a92941e4b40018cae5483d8bd6b47e7885",
+    "product.events.parquet": "e582e6ee4de2e8698b481b22d56edb694e7a70a8f1fc43af7ac162c3436dbda3",
+    "web.sessions.parquet": "29e689c3470acdcc095d2a2ced49d17c6254777f920f288d2a31dfa37c5aaa71"
+  }
+}
