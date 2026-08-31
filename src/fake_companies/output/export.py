@@ -6,6 +6,7 @@ seed). Files are written one per table as ``<schema>.<name>.<ext>``.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import duckdb
@@ -36,3 +37,14 @@ def export_tables(db_path: str | Path, out_dir: str | Path, fmt: str = "parquet"
     finally:
         con.close()
     return written
+
+
+def export_hashes(db_path: str | Path, out_dir: str | Path) -> dict[str, str]:
+    """Export all tables to Parquet and return ``{file name: sha256}``.
+
+    Backs the determinism tests and the golden migration pin.
+    """
+    return {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in export_tables(db_path, out_dir, fmt="parquet")
+    }
