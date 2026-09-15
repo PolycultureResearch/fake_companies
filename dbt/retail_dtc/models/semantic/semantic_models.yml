@@ -36,9 +36,6 @@ semantic_models:
       - name: session
         type: primary
         expr: session_id
-      - name: customer
-        type: foreign
-        expr: customer_id
     dimensions:
       - name: session_date
         type: time
@@ -55,6 +52,10 @@ semantic_models:
         description: Count of web sessions.
         agg: sum
         expr: 1
+      - name: converting_sessions
+        description: Sessions that placed an order (conversion numerator).
+        agg: sum
+        expr: case when customer_id is not null then 1 else 0 end
 
   # ----------------------------------------------------------------------- #
   # Customers
@@ -121,7 +122,7 @@ semantic_models:
         agg: sum
         expr: 1
       - name: session_orders
-        description: Orders attributed to a web session (conversion numerator).
+        description: Orders attributed to a web session.
         agg: sum
         expr: case when session_id is not null then 1 else 0 end
       - name: returning_customer_orders

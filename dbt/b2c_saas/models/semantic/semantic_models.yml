@@ -36,9 +36,6 @@ semantic_models:
       - name: session
         type: primary
         expr: session_id
-      - name: user
-        type: foreign
-        expr: user_id
     dimensions:
       - name: session_date
         type: time
@@ -55,6 +52,10 @@ semantic_models:
         description: Count of web sessions.
         agg: sum
         expr: 1
+      - name: signup_sessions
+        description: Sessions that ended in a signup (visit-to-signup numerator).
+        agg: sum
+        expr: case when user_id is not null then 1 else 0 end
 
   # ----------------------------------------------------------------------- #
   # Acquisition funnel
