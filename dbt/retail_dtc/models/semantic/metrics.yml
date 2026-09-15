@@ -21,6 +21,15 @@ metrics:
         name: sessions
         fill_nulls_with: 0
 
+  - name: converting_sessions
+    description: Sessions that placed an order (conversion numerator).
+    type: simple
+    label: Converting Sessions
+    type_params:
+      measure:
+        name: converting_sessions
+        fill_nulls_with: 0
+
   # --- Orders & customers --------------------------------------------------
   - name: orders
     description: Orders placed.
@@ -58,7 +67,7 @@ metrics:
       denominator: orders
 
   - name: session_orders
-    description: Orders attributed to a web session (conversion numerator).
+    description: Orders attributed to a web session.
     type: simple
     label: Session-Attributed Orders
     type_params:
@@ -67,11 +76,13 @@ metrics:
         fill_nulls_with: 0
 
   - name: conversion_rate
-    description: Session-attributed orders per session (site conversion).
+    description: Converting sessions per session (site conversion). Both sides
+      live on the sessions model, so the rate slices by session channel, device
+      and country only.
     type: ratio
     label: Conversion Rate
     type_params:
-      numerator: session_orders
+      numerator: converting_sessions
       denominator: sessions
 
   # --- Revenue -------------------------------------------------------------

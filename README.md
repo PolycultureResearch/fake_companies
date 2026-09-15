@@ -68,7 +68,7 @@ roughly:
 | `billing.payments` | ~— | dunning, ~5% failures (PSI on currency, quantiles on amount) |
 | `meta.ground_truth` | 12+ | every injected rate/dq anomaly, with expected affected signals |
 
-21 MetricFlow metrics (`marketing_spend`, `mrr`, `visit_signup_rate`, `dau`,
+38 MetricFlow metrics (`marketing_spend`, `mrr`, `visit_signup_rate`, `dau`,
 `wau`, `payment_failure_rate`, …) queryable at daily grain. Full run ≈ 20s.
 
 ## Architecture

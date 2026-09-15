@@ -66,7 +66,7 @@ export FAKE_DB=$(cd .. && pwd)/out/smoke.duckdb
 
 ## Metrics
 
-`marketing_spend`, `sessions`, `signups`, `visit_signup_rate`, `trials_started`,
+`marketing_spend`, `sessions`, `signups`, `signup_sessions`, `visit_signup_rate`, `trials_started`,
 `trial_conversion_rate`, `new_subscriptions`, `churned_subscriptions`,
 `active_subscriptions`, `mrr`, `new_mrr`, `expansion_mrr`, `contraction_mrr`,
 `churned_mrr`, `arpu`, `customer_churn_rate`, `dau`, `wau`, `product_events`,

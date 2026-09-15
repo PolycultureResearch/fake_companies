@@ -31,12 +31,23 @@ metrics:
         name: signups
         fill_nulls_with: 0
 
+  - name: signup_sessions
+    description: Sessions that ended in a signup (visit-to-signup numerator).
+    type: simple
+    label: Signup Sessions
+    type_params:
+      measure:
+        name: signup_sessions
+        fill_nulls_with: 0
+
   - name: visit_signup_rate
-    description: Signups per session (visit -> signup conversion).
+    description: Signup sessions per session (visit -> signup conversion). Both
+      sides live on the sessions model, so the rate slices by session channel,
+      device and country only.
     type: ratio
     label: Visit-to-Signup Rate
     type_params:
-      numerator: signups
+      numerator: signup_sessions
       denominator: sessions
 
   - name: trials_started
