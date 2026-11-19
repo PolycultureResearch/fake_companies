@@ -97,6 +97,7 @@ def write_generation(
     result: GenerationResult,
     out_path: str | Path,
     sidecar_dir: str | Path | None = None,
+    sidecar_stem: str | None = None,
 ) -> Path:
     """Persist a :class:`GenerationResult` to a DuckDB database + JSON sidecars."""
     out_path = Path(out_path)
@@ -107,7 +108,7 @@ def write_generation(
         writer.write("meta.run_manifest", manifest_frame(result.manifest))
 
     sidecar_dir = Path(sidecar_dir) if sidecar_dir else out_path.parent
-    write_json_sidecars(sidecar_dir, result.manifest, result.ground_truth)
+    write_json_sidecars(sidecar_dir, result.manifest, result.ground_truth, stem=sidecar_stem)
     return out_path
 
 

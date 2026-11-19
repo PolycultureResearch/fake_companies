@@ -81,10 +81,17 @@ def write_json_sidecars(
     out_dir: Path,
     manifest: dict[str, str],
     records: list[GroundTruthRecord],
+    stem: str | None = None,
 ) -> tuple[Path, Path]:
+    """Write ``run_manifest.json`` and ``ground_truth.json`` into ``out_dir``.
+
+    ``stem`` prefixes both names (``<stem>.ground_truth.json``) so several
+    worlds can share one directory.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / "run_manifest.json"
-    truth_path = out_dir / "ground_truth.json"
+    prefix = f"{stem}." if stem else ""
+    manifest_path = out_dir / f"{prefix}run_manifest.json"
+    truth_path = out_dir / f"{prefix}ground_truth.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
     truth_path.write_text(
         json.dumps([r.model_dump(mode="json") for r in records], indent=2, default=str)

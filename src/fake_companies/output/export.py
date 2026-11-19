@@ -43,6 +43,30 @@ def export_tables(db_path: str | Path, out_dir: str | Path, fmt: str = "parquet"
     return written
 
 
+def write_raw_parquet(frames, tables, out_dir: str | Path) -> list[Path]:
+    """Write a run's raw tables straight to ``<schema>.<table>.parquet`` files.
+
+    The world-set Parquet format: the same typed tables a DuckDB database
+    would hold (frames go through the same writer and DDL), without the
+    database. Rows are fully ordered, so the bytes are a function of the rows.
+    """
+    from .duckdb_writer import DuckDBWriter
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    with DuckDBWriter(":memory:", list(tables)) as writer:
+        for spec in tables:
+            writer.write(spec.fqn, frames[spec.fqn])
+            dest = out / f"{spec.fqn}.parquet"
+            writer.con.execute(
+                f"COPY (SELECT * FROM {spec.fqn} ORDER BY ALL) "
+                f"TO '{dest}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+            written.append(dest)
+    return written
+
+
 def export_hashes(db_path: str | Path, out_dir: str | Path) -> dict[str, str]:
     """Export all tables to Parquet and return ``{file name: sha256}``.
 

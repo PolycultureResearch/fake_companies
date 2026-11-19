@@ -65,6 +65,55 @@ def generate(
 
 
 @app.command()
+def worlds(
+    config: Path = typer.Option(..., "--config", "-c", help="Scenario YAML path."),
+    out: Path = typer.Option(..., "--out", "-o", help="World-set output directory."),
+    seeds: str = typer.Option("0", "--seeds", help="Seeds: N, N-M or a comma list (0-9, 0-2,7)."),
+    regime: list[str] | None = typer.Option(
+        None, "--regime", help="Regime(s) to build (repeatable; default: baseline)."
+    ),
+    null: bool = typer.Option(False, "--null", help="Build the null world (no anomalies)."),
+    singles: str | None = typer.Option(
+        None,
+        "--singles",
+        help="One world per scripted anomaly: 'all' or a comma list of names. "
+        "Always builds the null twin too.",
+    ),
+    story: bool = typer.Option(False, "--story", help="Build the config as written."),
+    fmt: str = typer.Option("duckdb", "--format", help="duckdb | parquet (raw tables only)."),
+    jobs: int = typer.Option(1, "--jobs", "-j", help="Parallel processes (output is identical)."),
+    set_: list[str] | None = typer.Option(
+        None, "--set", help="Override applied to every world (dotted.path=value, repeatable)."
+    ),
+) -> None:
+    """Build a world set: seeds x regimes x (null, singles, story) plus worlds.json."""
+    from .config.overrides import parse_overrides
+    from .worlds import MANIFEST_NAME, build_world_set, parse_seeds
+
+    try:
+        manifest = build_world_set(
+            config,
+            out,
+            seeds=parse_seeds(seeds),
+            regimes=regime,
+            null=null,
+            singles=singles,
+            story=story,
+            fmt=fmt,
+            jobs=jobs,
+            overrides=parse_overrides(set_),
+        )
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
+    kinds = [w.kind for w in manifest.worlds]
+    typer.echo(
+        f"Built {len(manifest.worlds)} worlds ({kinds.count('null')} null, "
+        f"{kinds.count('single')} single, {kinds.count('story')} story) for "
+        f"{len(manifest.regimes)} regime(s) x {len(manifest.seeds)} seed(s) -> {out / MANIFEST_NAME}"
+    )
+
+
+@app.command()
 def export(
     db: Path = typer.Option("out/company.duckdb", "--db", help="DuckDB database path."),
     out: Path = typer.Option("out/export", "--out", "-o", help="Output directory."),
