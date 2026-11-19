@@ -46,6 +46,11 @@ class GroundTruthRecord(BaseModel):
     # Filled from the difference between a single world and its null twin; see
     # ``fake_companies.effects``. Absent from an ordinary run's ground truth.
     measured_effects: dict[str, dict] | None = None
+    # Every metric whose total moved, declared or not. An empty list is a
+    # finding: the anomaly moved no metric (a dq anomaly whose rows staging
+    # deduplicates, or one that only delays loading — its truth is in
+    # ``affected_signals``).
+    metrics_moved: list[str] | None = None
     declared_affected_metrics_confirmed: dict[str, list[str]] | None = None
     root_effect: dict | None = None
     root_metric_confirmed: bool | None = None
@@ -54,6 +59,7 @@ class GroundTruthRecord(BaseModel):
     # ordinary run's file gains the root label and nothing else.
     MEASURED_FIELDS: ClassVar[tuple[str, ...]] = (
         "measured_effects",
+        "metrics_moved",
         "declared_affected_metrics_confirmed",
         "root_effect",
         "root_metric_confirmed",

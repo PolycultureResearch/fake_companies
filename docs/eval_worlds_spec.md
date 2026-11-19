@@ -419,14 +419,35 @@ subscription-day model), so each vertical names its stocks
 (`STOCK_METRICS` in `metrics.py`). `--no-raw` skips the raw tables; a world's
 `path` is then null.
 
-**Declared `affected_metrics` were left as they are.** The measured effects
-show where the hand-kept map is wrong (retail `category_demand.*` lists
-`units`, whose total cannot move; B2B `cycle_time_scale` omits the bookings,
-wins and stage counts it delays), and each single world's ground truth says
-so in `declared_affected_metrics_confirmed`. The map itself was not edited:
-it feeds `meta.ground_truth` and the published demo bundles, and
-`fake-companies score` matches detector labels against it. The root labels,
-which are new, carry the corrected answer.
+**Declared `affected_metrics` corrected where they were wrong by
+construction.** Phase 1 left the hand-kept map alone and recorded the
+disagreements. Devon then decided the labels should be right, accepting that
+default `meta.ground_truth` output changes:
+
+- retail `category_demand.*`: `units` removed (a mix shift cannot move total
+  units; measured exactly zero), `margin_rate` added. Declared now:
+  `gross_revenue`, `net_revenue`, `gross_margin`, `aov`, `margin_rate`. Units
+  by category stays the root slice.
+- B2B `cycle_time_scale`: `proposals_sent`, `negotiations`, `deals_won`,
+  `bookings`, `invoiced_revenue` added.
+- Nothing else was removed. Every (driver, declared metric) pair of every
+  vertical was probed on the smoke configs for an exactly-zero twin
+  difference; the only other zeros are B2C drivers whose base rate or
+  elasticity is zero in the smoke config, which is the config and not the
+  generator. B2C labels and its golden hashes are untouched.
+
+What changes in default output: the `affected_metrics` value of records that
+target those two drivers, in `meta.ground_truth` and `ground_truth.json`. In
+the shipped demo configs that is Alpenglow `tees_demand_slump` and
+`surprise_rate_spike_2025-12-25` (it lands on `category_demand.shorts`), and
+Meridian `legal_backlog`. No raw table changes. `fake-companies score` now
+also accepts an anomaly's `root_metric` as a label, so a detector that flags
+units for a mix shift still matches.
+
+Each single world's ground truth also gained `metrics_moved`, the metrics
+whose total moved, declared or not. For a dq anomaly that moves no metric
+(duplicates that staging removes, a loading delay) it is `[]`, which is the
+plain statement that its truth is only in `affected_signals`.
 
 **A crash found by sweeping seeds.** A retail session in the last ten minutes
 of the final day places its order past the timeline; the returns stage indexed

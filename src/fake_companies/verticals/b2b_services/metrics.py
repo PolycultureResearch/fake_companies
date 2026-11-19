@@ -49,7 +49,24 @@ _DRIVER_METRICS: list[tuple[str, list[str]]] = [
         ["deals_won", "win_rate", "bookings", "invoiced_revenue"],
     ),
     ("deal_size", ["avg_deal_size", "bookings", "invoiced_revenue", "open_pipeline_value"]),
-    ("cycle_time_scale", ["sales_cycle_days", "open_deals", "open_pipeline_value"]),
+    # Slower stages hold deals back: while the scale is up, everything that
+    # happens at a stage exit lands later, so the stage counts, wins, bookings
+    # and invoicing all dip in the window (measured on Meridian at x1.6:
+    # bookings -32%, deals_won -31%, negotiations -30%, proposals_sent -15%,
+    # invoiced_revenue -13%) while open deals pile up.
+    (
+        "cycle_time_scale",
+        [
+            "sales_cycle_days",
+            "open_deals",
+            "open_pipeline_value",
+            "proposals_sent",
+            "negotiations",
+            "deals_won",
+            "bookings",
+            "invoiced_revenue",
+        ],
+    ),
 ]
 
 

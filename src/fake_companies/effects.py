@@ -379,6 +379,9 @@ def ground_truth_fields(
     """The measured fields of one anomaly's ground-truth record.
 
     - ``measured_effects``: per metric, the total's stats.
+    - ``metrics_moved``: the metrics whose total moved, declared or not. Empty
+      when the anomaly moved no metric at all, which is what most dq
+      anomalies do.
     - ``declared_affected_metrics_confirmed``: each declared metric under
       ``moved`` (its total moved), ``moved_in_slice_only`` (the total did not,
       but the metric at the anomaly's own slice did — the designed behaviour
@@ -412,6 +415,7 @@ def ground_truth_fields(
 
     out: dict[str, Any] = {
         "measured_effects": measured,
+        "metrics_moved": sorted(m for m, stats in measured.items() if stats["moved"]),
         "declared_affected_metrics_confirmed": confirmed,
     }
     if root_metric is not None:

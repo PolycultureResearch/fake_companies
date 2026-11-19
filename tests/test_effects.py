@@ -194,6 +194,7 @@ def test_ground_truth_fields_sort_declared_metrics():
     assert fields["root_metric_confirmed"] is True
     assert fields["root_effect"]["rel_change"] == pytest.approx(-0.4, abs=0.03)
     assert set(fields["measured_effects"]) == {"total_moves", "slice_moves", "quiet"}
+    assert fields["metrics_moved"] == ["total_moves"]
     json.dumps(fields)  # JSON-ready: no NaN, numpy scalars or dates left
 
     silent = ground_truth_fields(summary, [], "quiet", None)
@@ -273,6 +274,11 @@ def test_root_effect_has_the_declared_sign_and_size(name, smoke_sets):
         if truth["kind"] != "rate":
             assert truth["root_metric"] is None and "root_effect" not in truth
             assert truth["measured_effects"], "dq anomalies are measured too"
+            # ...and the record says plainly which metrics moved, if any.
+            assert truth["metrics_moved"] == sorted(
+                m for m, e in truth["measured_effects"].items() if e["moved"]
+            )
+            assert truth["affected_metrics"] == [] and truth["affected_signals"]
             continue
         root = truth["root_effect"]
         assert truth["root_metric_confirmed"] is True, (world.id, root)

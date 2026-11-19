@@ -257,6 +257,9 @@ bytes, whichever other worlds are in the set.
   `first_diff` (the first day the twins differ at all), `onset` / `offset`
   (first and last day over the floor), `days_over_floor`, `z_window` /
   `z_extended` (the window test) and `moved`.
+- `metrics_moved`: every metric whose total moved, declared or not. `[]` means
+  the anomaly moved no metric — true of most data-quality anomalies, whose
+  truth is in `affected_signals`.
 - `root_effect` and `root_metric_confirmed`: the same for the root metric at
   the root slice.
 - `declared_affected_metrics_confirmed`: each of `affected_metrics` under

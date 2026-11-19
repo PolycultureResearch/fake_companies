@@ -194,3 +194,21 @@ def test_stock_metrics_exist(name):
     assert v.stock_metrics() <= set(layer.metrics)
     for metric in v.stock_metrics():
         assert layer.time_aggregation(metric, v.stock_metrics()) == "end_of_period"
+
+
+def test_declared_effects_match_what_was_measured():
+    """Labels corrected from the measured effects (eval-worlds spec, section 9).
+
+    - A category mix shift cannot move total units or orders; it moves what
+      depends on the price and margin of the mix.
+    - A slower sales cycle delays every stage exit, so wins, bookings and
+      invoicing dip while open deals pile up.
+    """
+    retail = REGISTRY["retail_dtc"].affected_metrics("category_demand.tees")
+    assert "units" not in retail and "orders" not in retail
+    assert {"gross_revenue", "net_revenue", "gross_margin", "aov", "margin_rate"} == set(retail)
+    b2b = REGISTRY["b2b_services"].affected_metrics("cycle_time_scale")
+    assert {"bookings", "deals_won", "negotiations", "proposals_sent", "invoiced_revenue"} <= set(
+        b2b
+    )
+    assert {"sales_cycle_days", "open_deals", "open_pipeline_value"} <= set(b2b)

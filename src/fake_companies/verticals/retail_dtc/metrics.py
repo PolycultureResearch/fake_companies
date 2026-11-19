@@ -38,9 +38,14 @@ _DRIVER_METRICS: list[tuple[str, list[str]]] = [
             "net_revenue",
         ],
     ),
+    # A mix shift: it reweights which categories land in baskets and nothing
+    # else, so total units and orders cannot move (measured: exactly zero).
+    # What moves in total is what depends on the price and margin of the mix;
+    # a slump in a cheap category *raises* revenue and AOV. Units move only by
+    # category, which is this driver's root slice (see _ROOTS).
     (
         "category_demand.",
-        ["units", "gross_revenue", "net_revenue", "gross_margin", "aov"],
+        ["gross_revenue", "net_revenue", "gross_margin", "aov", "margin_rate"],
     ),
     ("return_rate.", ["return_rate", "refunds", "net_revenue"]),
 ]
