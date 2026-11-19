@@ -79,7 +79,7 @@ def test_noise_alone_does_not_move():
     null = 100 + rng.normal(0, 3, len(DAYS))
     row = _summary(null, null + rng.normal(0, 3, len(DAYS)))
     assert not row["moved"]
-    assert abs(row["z_window"]) < NOISE_K
+    assert abs(row["z_window"]) < NOISE_K and abs(row["z_extended"]) < NOISE_K
     assert row["days_over_floor"] <= 1
 
 
@@ -94,6 +94,7 @@ def test_aligned_streams_have_zero_pre_onset_noise():
     world[_window()] -= 30
     row = _summary(null, world)
     assert row["pre_onset_rms_diff"] == 0.0 and row["pre_onset_max_abs_diff"] == 0.0
+    assert row["first_diff"] == START
     assert row["noise_floor"] > 0 and row["moved"] and row["onset"] == START
 
 
@@ -106,9 +107,11 @@ def test_identical_twins_and_noiseless_changes():
     world[_window()] = 40.0
     exact = _summary(null, world)
     assert exact["moved"] and exact["rel_change"] == pytest.approx(-0.2)
-    assert exact["z_window"] < -NOISE_K and exact["days_over_floor"] == _window().sum()
-    # A single differing day at the very end leaves nothing to estimate noise
-    # from: with zero noise, any difference counts.
+    # The only two steps are the anomaly switching on and off: no noise, so
+    # there is nothing to divide by and every differing day counts.
+    assert exact["noise_floor"] == 0 and exact["z_window"] is None
+    assert exact["days_over_floor"] == _window().sum()
+    assert exact["onset"] == START and exact["offset"] == END
     last = null.copy()
     last[-1] = 49.0
     effects = twin_effects(_series(null), _series(last), {"m": 0.0})
@@ -214,6 +217,7 @@ def test_cross_seed_summary():
                 "rel_change": rel,
                 "pre_onset_rms_diff": 1.0,
                 "noise_floor": 4.0,
+                "first_diff": START,
                 "onset": START + dt.timedelta(days=seed),
                 "offset": END,
                 "days_over_floor": 10,
@@ -460,3 +464,36 @@ def test_twin_metric_noise_before_the_anomaly(name, smoke_sets):
         assert not (expected["noisy_metrics"] & zero), (world.id, expected["noisy_metrics"] & zero)
         for metric in expected["noisy_metrics"]:
             assert measured[metric]["noise_floor"] > 0
+
+
+def test_float_summation_order_is_not_a_difference():
+    null = np.full(len(DAYS), 1234.5)
+    world = null * (1 + 1e-13)
+    effects = twin_effects(_series(null), _series(world), {"m": 0.0})
+    assert (effects["diff"] == 0).all()
+    assert not summarize_twin(effects, START, END).iloc[0]["moved"]
+
+
+def test_reshuffled_timing_does_not_hide_a_sparse_effect():
+    """A return-rate anomaly re-deals the request delay of every later return:
+    the twins differ on most later days, but only by returns landing on other
+    days. A white-noise standard error would bury the effect; placebo windows
+    see that the reshuffle cancels inside a window."""
+    days = pd.date_range("2024-01-01", periods=600, freq="D")
+    rng = np.random.default_rng(6)
+    null = rng.poisson(3.0, len(days)).astype(float)
+    start, end = dt.date(2024, 4, 1), dt.date(2024, 5, 5)
+    window = np.asarray((days >= pd.Timestamp(start)) & (days <= pd.Timestamp(end)))
+    after = np.flatnonzero(days >= pd.Timestamp(start))
+    world = null.copy()
+    for i in after[:-1]:  # every later return may slip a day either way
+        moved = rng.binomial(int(world[i]), 0.3)
+        world[i] -= moved
+        world[i + 1] += moved
+    world[window] += rng.poisson(1.5, window.sum())
+    frame = pd.DataFrame({"date": days, "metric": "m", "dimension": None, "value": None})
+    effects = twin_effects(frame.assign(v=null), frame.assign(v=world), {"m": 0.0})
+    row = summarize_twin(effects, start, end).iloc[0]
+    assert row["pre_onset_rms_diff"] == 0 and row["first_diff"] == start
+    assert row["rel_change"] == pytest.approx(0.5, abs=0.15)
+    assert row["moved"] and row["z_window"] > NOISE_K

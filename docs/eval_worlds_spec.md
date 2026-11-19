@@ -1,6 +1,6 @@
 # Spec: world sets for evaluation
 
-**Status:** proposal, 2026-11-19. Phase 1 is ready to build.
+**Status:** phase 1 built, 2026-11-19 (see §8 for what changed on the way). Phase 2 not started.
 
 ## 1. Purpose
 
@@ -279,6 +279,147 @@ Not part of this work, listed so they are not lost:
 - Breakdown's `dbt` provider reads the dbt project even when every series is
   already cached, so a consumer needs this repo checked out to read a
   snapshot. That is a Breakdown change, noted there.
+
+## 8. Decisions made while building phase 1
+
+Where the spec was silent or turned out wrong, the smallest sensible choice
+was made. Each is recorded here so the spec and the code agree.
+
+**The twin is not identical before the anomaly (§4.5, §4.7).** The spec
+asserted that a single world equals its null world on every day before the
+anomaly starts. That holds for dq anomalies (only the target table changes,
+and only inside the window) and for entity builders that draw in time order:
+CPG scan sales and shipments, and retail session conversion. It does not hold
+for the rest. Each builder draws for the whole timeline from one stream, and
+several draw in an order that is not time: B2C and retail sessions and ad
+spend go channel by channel, retail repeat orders customer by customer, the
+B2B pipeline source by source, and the `_loaded_at` lags table by table. An
+anomaly that changes how many values such a builder consumes re-deals rows
+dated long before it. So:
+
+- the test asserts what is true, per vertical: which tables match over the
+  whole timeline, which match before the anomaly, and that the others differ
+  (`tests/test_effects.py`, `TWIN_COUPLING`);
+- a twin difference is treated as effect plus realization noise everywhere,
+  and the noise is measured per series;
+- nothing about how builders consume their streams was changed.
+
+**The noise floor (§4.5).** The spec defined it from metrics the anomaly
+cannot reach, which needs a reachability map — the hand-kept map this work
+exists to check. Instead each series gets its own: the larger of the RMS twin
+difference before the anomaly and the RMS day-over-day change of the
+difference after the streams diverge (the two largest steps set aside: they
+are the anomaly switching on and off), times `NOISE_K = 4`. `onset` and
+`offset` are the first and last day over that floor, as specified, and
+`first_diff` is the first day the twins differ at all, which is the exact
+arrival date whenever the streams were aligned until the anomaly.
+
+Whether a series *moved* is a separate, window-level test, because a per-day
+threshold misses a real effect spread thinly over weeks (a jackets recall
+adds two or three returned units a day) and fires on a stray lumpy day months
+later. `z_window` is the mean difference over the declared window over its
+standard error; `z_extended` is the same over the window stretched by its own
+length, for effects that land late. The standard error is `sigma / sqrt(n)`,
+or the spread of the mean over placebo windows elsewhere in the same twin
+when that is smaller (re-dealt timing cancels inside a window). Stock-like
+series, whose noise accumulates, are tested against the level noise expected
+at the window. The constants are in `worlds.json` under `noise`. Per-twin
+verdicts on stock-like series are the weakest part: trust the cross-seed
+summary there.
+
+**`not_detected`, not "did not move" (§4.5).**
+`declared_affected_metrics_confirmed` has three lists: `moved`,
+`moved_in_slice_only` (the total did not clear its noise but the metric at the
+anomaly's own slice did, which is what a segmented anomaly is designed to do)
+and `not_detected`. One twin cannot show that a metric did not move.
+`effects_summary.parquet` adds `rel_change_sem`, `t_across_seeds` and
+`moved_share` so the cross-seed answer can be read directly.
+
+**Cohort-dated metrics.** A metric bucketed by the start of a cohort (B2C
+trial metrics, by trial start) differs before the anomaly for causal reasons.
+Its pre-onset noise estimate is too large, which errs towards `not_detected`.
+
+**Metric series come from the dbt project, in-process (§4.5).** One `dbt
+build` on the 90-day retail smoke config takes about 5 s and each `mf query`
+2 to 3 s, so dbt per world was ruled out. Instead of a second, per-vertical
+copy of the aggregation, `fake_companies.semantic` runs the vertical's own
+staging and mart SQL in an in-memory DuckDB and evaluates its semantic YAML.
+Every metric of all four verticals is reproduced exactly on the smoke configs
+(`tests/test_semantic_matches_metricflow.py`), so nothing is left out of the
+effects tables today; a metric the module cannot reproduce is refused by name
+and listed in `worlds.json` under `unsupported_metrics`. Building effects
+needs the repo's `dbt/` directory (not the dbt extra); `--no-effects` builds a
+set without them.
+
+**Root labels carry a slice, not one pair (§4.6).** The spec gave
+`root_dimension` / `root_value` only to anomalies with a `segment`. But the
+driver itself names a member (`spend.paid_social` is marketing spend *for
+paid social*), and a segmented anomaly is then two dimensions at once. So the
+root slice is the driver's member followed by the segment dims the entity
+builder honors; `root_dimension` / `root_value` are comma-joined when there is
+more than one (`channel,device` / `paid_search,mobile`), which is also how the
+effects table spells that slice, and `root_slice` holds the mapping. A segment
+on a driver whose builder ignores segments adds nothing to the slice, because
+it does nothing to the data.
+
+**The root is the closest metric MetricFlow can slice.** `return_rate.<cat>`
+and `churn.<plan>` root at the numerator count (`returned_units`,
+`churned_subscriptions`): the ratio's two sides sit on different semantic
+models, so no single group-by addresses its category or plan.
+`category_demand.<cat>` roots at `units` by category.
+
+**Dimension names.** Effects tables and root labels use the dimension's name
+on its semantic model (`channel`). `worlds.json` → `metrics[].dimensions` maps
+each to the MetricFlow group-by id (`session__channel`), or null where the
+metric spans models. Slices match by exact name: a metric whose model calls
+the same concept something else (`signup_channel`, `first_channel`) appears in
+totals only.
+
+**Where the new ground-truth fields live.** In `ground_truth.json`.
+`meta.ground_truth` keeps its twelve columns, because the table's bytes are
+pinned by the golden hashes. The root label is written by every run; the
+measured fields only for single worlds of a set.
+
+**Manifest additions.** Beyond §4.4: `company_slug`, `format`, `seeds`,
+`regimes`, `effects_summary`, `noise`, `metrics`, `unsupported_metrics`, and
+per world `run_manifest` and `config_hash`. `config_sha256` is of the YAML
+file's bytes; `config_hash` is of the effective config (regime, overrides and
+selection applied).
+
+**Singles imply the null world (§4.3).** A single world without its twin
+cannot be measured, so `--singles` builds the null world whether or not
+`--null` is given. The story world gets no effects table: it holds several
+anomalies and a twin difference would not separate them.
+
+**Bytes (§4.4).** Parquet worlds are byte-stable and tested as such. DuckDB
+worlds are tested by content (Parquet export hashes); the database file is
+not promised to be byte-identical.
+
+**Overrides (§4.2).** `*` in a path matches every key or item at that point;
+values are parsed as YAML; a path may end in a new key but not pass through a
+missing section. `--set` on `worlds` applies to every world on top of the
+regime. `long_history` extends the timeline forward to 1095 days so scripted
+anomalies keep their dates. `no_seasonality` removes the annual cycle, the
+holiday effect and the day-of-week shape; it leaves promotions alone.
+
+**Growth regimes in `cpg_wholesale` are nearly empty.** Only brand-marketing
+spend has a growth curve there, and marketing is decoupled from sales, so
+`flat`, `declining` and `accelerating` change `marketing_spend` and nothing
+else. A growth curve on consumer demand is a change to the vertical.
+
+**Declared `affected_metrics` were left as they are.** The measured effects
+show where the hand-kept map is wrong (retail `category_demand.*` lists
+`units`, whose total cannot move; B2B `cycle_time_scale` omits the bookings,
+wins and stage counts it delays), and each single world's ground truth says
+so in `declared_affected_metrics_confirmed`. The map itself was not edited:
+it feeds `meta.ground_truth` and the published demo bundles, and
+`fake-companies score` matches detector labels against it. The root labels,
+which are new, carry the corrected answer.
+
+**A crash found by sweeping seeds.** A retail session in the last ten minutes
+of the final day places its order past the timeline; the returns stage indexed
+one row past the driver panel. Fixed by clipping the index, which changes no
+run that completed before.
 
 ---
 

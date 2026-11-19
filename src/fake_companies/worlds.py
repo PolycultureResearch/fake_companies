@@ -97,8 +97,9 @@ class NoiseDefinition(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    k: float
-    min_days_over: int
+    k: float  # NOISE_K: per-day floor and window z threshold, in noise sigmas
+    integrated_ratio: float  # level noise / step noise above which a series is stock-like
+    min_placebo_windows: int  # placebo windows needed to use their spread
 
 
 class WorldSetManifest(BaseModel):
@@ -239,10 +240,10 @@ class RootNotConfirmedWarning(UserWarning):
     """A single world's declared root metric did not clear its noise floor."""
 
 
-def _dimension_sets(record) -> list[tuple[str, ...]]:
+def _dimension_sets(root_slice: dict[str, str]) -> list[tuple[str, ...]]:
     """Slices an anomaly's effects are cut by: its whole root slice, then each
     single dimension of it."""
-    dims = tuple(record.root_slice or {})
+    dims = tuple(root_slice)
     sets = [dims] if dims else []
     sets += [(d,) for d in dims if (d,) not in sets]
     return sets
@@ -302,19 +303,26 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
         layer = SemanticLayer.for_vertical(get_vertical(cfg.company.vertical), job["dbt_root"])
         fills = {name: layer.fill_value(name) for name in layer.metrics}
 
-    # Generate the singles first: the null world's series must carry every
-    # slice any of its twins is measured on.
-    results = {p.id: generate(cfg, seed=seed, anomalies=p.selection) for p in job["plans"]}
-    sets_by_plan = {
-        p.id: _dimension_sets(results[p.id].ground_truth[0]) if p.kind == "single" else []
-        for p in job["plans"]
-    }
+    # Which slices each single is measured on follows from its anomaly's root
+    # label, so the null world (built first) can carry every slice its twins
+    # need without any of them having been generated yet. One world is in
+    # memory at a time.
+    vertical = get_vertical(cfg.company.vertical)
+    scripted = {a.name: a for a in cfg.anomalies.scripted}
+    sets_by_plan: dict[str, list[tuple[str, ...]]] = {}
+    for p in job["plans"]:
+        sets_by_plan[p.id] = []
+        if p.kind == "single":
+            anomaly = scripted[p.selection.removeprefix("only:")]
+            if anomaly.kind == "rate":
+                label = vertical.root_label(anomaly.target, anomaly.segment)
+                sets_by_plan[p.id] = _dimension_sets(label.slice)
     null_sets = list(dict.fromkeys(s for sets in sets_by_plan.values() for s in sets))
 
     out: dict[str, Any] = {"entries": [], "summaries": [], "warnings": []}
     null_series = None
     for plan in job["plans"]:
-        result = results.pop(plan.id)
+        result = generate(cfg, seed=seed, anomalies=plan.selection)
         con = effects_rel = None
         try:
             measure = layer is not None and plan.kind in ("null", "single")
@@ -385,6 +393,7 @@ def _raw_connection(result):
     writer = DuckDBWriter(":memory:", list(result.tables))
     for spec in result.tables:
         writer.write(spec.fqn, result.frames[spec.fqn])
+    writer.con.execute("SET enable_progress_bar = false")
     return writer.con
 
 
@@ -415,7 +424,12 @@ def build_world_set(
     """
     import warnings
 
-    from .effects import MIN_DAYS_OVER, NOISE_K, summarize_across_seeds
+    from .effects import (
+        INTEGRATED_RATIO,
+        MIN_PLACEBO_WINDOWS,
+        NOISE_K,
+        summarize_across_seeds,
+    )
     from .verticals import get_vertical
 
     if fmt not in ("duckdb", "parquet"):
@@ -486,7 +500,13 @@ def build_world_set(
         seeds=sorted(set(seeds)),
         regimes=regimes,
         effects_summary=summary_rel,
-        noise=NoiseDefinition(k=NOISE_K, min_days_over=MIN_DAYS_OVER) if measured else None,
+        noise=NoiseDefinition(
+            k=NOISE_K,
+            integrated_ratio=INTEGRATED_RATIO,
+            min_placebo_windows=MIN_PLACEBO_WINDOWS,
+        )
+        if measured
+        else None,
         metrics=[
             MetricInfo(
                 name=name,

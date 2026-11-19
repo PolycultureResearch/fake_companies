@@ -134,6 +134,38 @@ uv run fake-companies score --truth ground_truth.json --events my_events.json --
 
 Don't open `ground_truth.json` until after scoring.
 
+### A company with no anomalies, or with exactly one
+
+```bash
+uv run fake-companies generate -c configs/alpenglow_retail_dtc.yaml -o out/null.duckdb \
+    --anomalies none                         # no scripted anomalies, no surprises
+uv run fake-companies generate -c configs/alpenglow_retail_dtc.yaml -o out/one.duckdb \
+    --anomalies only:paid_social_budget_cut  # named scripted anomalies, no surprises
+```
+
+`--anomalies all` is the default and is what the config says. Selection never
+changes any other random draw: the rows that the dropped anomalies did not touch
+come out the same.
+
+### Change one thing about the baseline
+
+`--set` overrides a config value by dotted path (repeatable; the value is YAML;
+`*` stands for every key at that point). The result is validated like a
+hand-edited file and the overrides are recorded in `run_manifest.json`.
+
+```bash
+uv run fake-companies generate -c configs/smoke_retail_90d.yaml -o out/x.duckdb \
+    --set calendar.annual_amp=0 --set 'traffic.channels.*.growth={kind: flat}'
+```
+
+`--regime <name>` applies a named set of overrides from
+`configs/regimes/<vertical>.yaml`: `flat`, `declining`, `accelerating`,
+`long_history` (three years from the configured start) or `no_seasonality` (no
+annual cycle, holiday effect or day-of-week shape). A regime changes the
+baseline only and never the anomalies. In `cpg_wholesale` the three growth
+regimes move marketing spend and nothing else, because that is the only driver
+there with a growth curve.
+
 ### Change scale / timeline / seed
 
 - Timeline: `timeline: { start: 2024-01-01, days: 365 }` (or `end:`).
@@ -155,6 +187,94 @@ Don't open `ground_truth.json` until after scoring.
   checks every tree metric + Tremor table against a built db.
 - **Tremor dataflow mode** profiles the raw tables directly (needs `event_time` +
   `_loaded_at`). See `examples/tremor_white_cube.yaml`.
+
+## World sets (evaluating a tool, not just running it)
+
+One generated company cannot tell you whether a tool is right. A **world set**
+is a batch of related companies with a manifest: the same company with and
+without each anomaly, across seeds, optionally under several regimes.
+
+```bash
+uv run fake-companies worlds --config configs/alpenglow_retail_dtc.yaml \
+    --seeds 0-9 --regime baseline --regime flat \
+    --null --singles all --format parquet --jobs 4 --out out/worlds/alpenglow
+```
+
+Per regime and seed this writes the **null** world (no anomalies), one
+**single** world per scripted anomaly (`--singles all`, or a comma list of
+names; singles always bring their null twin), and with `--story` the config as
+written. `--format duckdb` (default) writes one database per world; `parquet`
+writes the raw tables as `<schema>.<table>.parquet`, which is smaller. `--jobs`
+only changes the wall time. `--set` applies an override to every world.
+
+```
+out/worlds/alpenglow/
+  worlds.json                                   # the manifest: read this, not the tree
+  effects_summary.parquet                       # every effect across seeds
+  baseline/s0/null/                             # or null.duckdb
+  baseline/s0/null.ground_truth.json            # []
+  baseline/s0/null.run_manifest.json
+  baseline/s0/only.paid_social_budget_cut/
+  baseline/s0/only.paid_social_budget_cut.ground_truth.json
+  baseline/s0/only.paid_social_budget_cut.run_manifest.json
+  baseline/s0/only.paid_social_budget_cut.effects.parquet
+```
+
+Read a set through its manifest (paths are relative to it):
+
+```python
+import json, pandas as pd
+from fake_companies.worlds import load_world_set
+
+root = "out/worlds/alpenglow"
+ws = load_world_set(root)                      # a validated WorldSetManifest
+for single, null in ws.twins():                # (single world, its null twin)
+    truth = json.load(open(f"{root}/{single.ground_truth}"))[0]
+    effects = pd.read_parquet(f"{root}/{single.effects}")
+    orders = pd.read_parquet(f"{root}/{single.path}/shop_db.orders.parquet")
+summary = pd.read_parquet(f"{root}/{ws.effects_summary}")
+```
+
+World ids are `<slug>.<regime>.s<seed>.<null | only.<anomaly> | story>`. The
+same config, seed, regime and anomaly always give the same id and the same
+bytes, whichever other worlds are in the set.
+
+**Ground truth in a single world** has the usual fields plus:
+
+- `root_metric`, `root_dimension`, `root_value` (and `root_slice`, the same as
+  a mapping): the MetricFlow metric the anomaly moves first and the slice of it
+  that it touches, e.g. `conversion_rate` / `channel,device` /
+  `paid_search,mobile`. `worlds.json` → `metrics[].dimensions` maps each
+  dimension to its MetricFlow group-by id (`channel` → `session__channel`).
+  Every `generate` run writes these too.
+- `measured_effects`: per metric, read off the difference between this world
+  and its null twin: `rel_change` over the declared window, `noise_floor`,
+  `first_diff` (the first day the twins differ at all), `onset` / `offset`
+  (first and last day over the floor), `days_over_floor`, `z_window` /
+  `z_extended` (the window test) and `moved`.
+- `root_effect` and `root_metric_confirmed`: the same for the root metric at
+  the root slice.
+- `declared_affected_metrics_confirmed`: each of `affected_metrics` under
+  `moved`, `moved_in_slice_only` or `not_detected`.
+
+**`*.effects.parquet`** is the day-by-day table behind those numbers: `date`,
+`metric`, `dimension`, `value`, `null_value`, `world_value`, `diff`, for every
+metric of the vertical (`dimension` and `value` are null for the total; the
+slices are the anomaly's root slice and each of its dimensions).
+
+**Read the measured numbers as effect plus noise.** A single world and its null
+twin share a seed, but most entity builders draw for the whole timeline from one
+stream, so the two realizations differ beyond the anomaly, often from the first
+day. One twin cannot confirm a small effect: `not_detected` means "did not clear
+this twin's noise", not "the generator left it alone". For the expected effect
+use `effects_summary.parquet` (`rel_change_mean`, `rel_change_sd`,
+`rel_change_sem`, `moved_share`, per regime, anomaly, metric and slice) and
+build more seeds until the standard error is small enough for your purpose.
+`fake_companies.effects` documents every number.
+
+The metric series are computed in-process from the vertical's dbt project
+(`fake_companies.semantic`), not by running dbt, so building a set needs the
+repo checkout but not the dbt extra. `--no-effects` skips them.
 
 ## Reference
 

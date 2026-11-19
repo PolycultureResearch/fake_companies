@@ -70,9 +70,12 @@ def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPane
     panel.set("repeat_rate", _prob(cfg.repeat.monthly_repeat_rate * noise("repeat_rate", 0.5)))
 
     # --- per-category demand (mean ~1 mix multiplier) and return rates ------- #
-    # category_demand reweights which categories land in baskets AND scales
-    # line intensity, so a demand drop shows in units and revenue for that
-    # category while the topline conversion stays clean.
+    # category_demand reweights which categories land in baskets and nothing
+    # else: lines per order and quantities do not read it. A demand drop is a
+    # mix shift — that category's units and revenue fall, the other
+    # categories' rise by the same number of units, and total units and orders
+    # do not move at all. Total revenue moves with the price of what the
+    # basket shifted to (a slump in a cheap category raises it).
     for cat in cfg.catalog.categories:
         panel.set(f"category_demand.{cat}", noise(f"category_demand.{cat}", 1.0))
         base = cfg.returns.rate.get(cat, cfg.returns.rate_default)

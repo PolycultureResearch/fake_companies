@@ -316,6 +316,7 @@ class SemanticLayer:
         for fqn, df in frames.items():
             writer.write(fqn, df)
         con = writer.con
+        con.execute("SET enable_progress_bar = false")  # no terminal noise per world
         con.execute("CREATE SCHEMA dbt")
         needed: list[str] = []
 
