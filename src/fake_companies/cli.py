@@ -22,13 +22,25 @@ def generate(
     dump_drivers: Path | None = typer.Option(
         None, "--dump-drivers", help="Write the latent driver panel to CSV for inspection."
     ),
+    anomalies: str = typer.Option(
+        "all",
+        "--anomalies",
+        help="all (default) | none | only:<name>[,<name>...] (named scripted anomalies, "
+        "no surprise sampling).",
+    ),
 ) -> None:
     """Generate a company's raw data into a DuckDB database."""
+    from .anomalies import select_anomalies
     from .config import load_config
     from .generate import run_generation
 
     cfg = load_config(config)
-    result = run_generation(cfg, out, seed=seed)
+    try:
+        select_anomalies(cfg, anomalies)  # fail on a bad selection before generating
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
+    result = run_generation(cfg, out, seed=seed, anomalies=anomalies)
+    cfg = result.cfg  # the effective config (anomaly selection applied)
     typer.echo(
         f"Generated {cfg.company.name}: {result.calendar.n_days} days, "
         f"{sum(len(f) for f in result.frames.values())} rows, "

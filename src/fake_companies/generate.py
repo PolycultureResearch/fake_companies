@@ -40,8 +40,18 @@ class GenerationResult:
     manifest: dict[str, str] = field(default_factory=dict)
 
 
-def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResult:
-    """Run the full pipeline in memory and return frames + ground truth."""
+def generate(
+    cfg: BaseScenarioConfig, seed: int | None = None, anomalies: str = "all"
+) -> GenerationResult:
+    """Run the full pipeline in memory and return frames + ground truth.
+
+    ``anomalies`` narrows the anomaly set (``all`` | ``none`` |
+    ``only:<name>[,...]``, see :func:`fake_companies.anomalies.select_anomalies`);
+    the default leaves ``cfg`` and every output byte untouched.
+    """
+    from .anomalies import resolve_anomalies, select_anomalies
+
+    cfg = select_anomalies(cfg, anomalies)
     seed = cfg.seed if seed is None else seed
     vertical = get_vertical(cfg.company.vertical)
     cal = build_calendar(cfg)
@@ -51,8 +61,6 @@ def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResu
     ground_truth: list[GroundTruthRecord] = []
 
     # Resolve scripted + surprise anomalies once (stable rate/dq split).
-    from .anomalies import resolve_anomalies
-
     resolved = resolve_anomalies(cfg, cal, rng, vertical)
 
     # --- Layer 1: latent driver panel + rate anomalies ---------------------- #
@@ -73,7 +81,7 @@ def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResu
     dq_gt = apply_loading_and_dq(cfg, cal, rng, frames, resolved, tables=vertical.tables())
     ground_truth.extend(dq_gt)
 
-    manifest = build_manifest(cfg, seed, len(ground_truth))
+    manifest = build_manifest(cfg, seed, len(ground_truth), anomaly_selection=anomalies)
     return GenerationResult(
         cfg=cfg,
         seed=seed,
@@ -108,7 +116,8 @@ def run_generation(
     out_path: str | Path,
     seed: int | None = None,
     sidecar_dir: str | Path | None = None,
+    anomalies: str = "all",
 ) -> GenerationResult:
-    result = generate(cfg, seed=seed)
+    result = generate(cfg, seed=seed, anomalies=anomalies)
     write_generation(result, out_path, sidecar_dir=sidecar_dir)
     return result

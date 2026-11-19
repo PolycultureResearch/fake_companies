@@ -18,8 +18,16 @@ from ..groundtruth import GroundTruthRecord
 TOOL_VERSION = "0.1.0"
 
 
-def build_manifest(cfg: BaseScenarioConfig, seed: int, n_records: int) -> dict[str, str]:
-    return {
+def build_manifest(
+    cfg: BaseScenarioConfig, seed: int, n_records: int, anomaly_selection: str = "all"
+) -> dict[str, str]:
+    """The run manifest for ``cfg`` (the *effective* config: after any
+    overrides and anomaly selection, so ``config_hash`` identifies the bytes).
+
+    ``anomaly_selection`` is recorded only when it is not the default, so a
+    default run's manifest is exactly what it was before selection existed.
+    """
+    manifest = {
         "tool_version": TOOL_VERSION,
         "company": cfg.company.name,
         "company_slug": cfg.company.slug,
@@ -31,6 +39,9 @@ def build_manifest(cfg: BaseScenarioConfig, seed: int, n_records: int) -> dict[s
         "n_days": str(cfg.timeline.n_days),
         "n_ground_truth": str(n_records),
     }
+    if anomaly_selection != "all":
+        manifest["anomaly_selection"] = anomaly_selection
+    return manifest
 
 
 def manifest_frame(manifest: dict[str, str]) -> pd.DataFrame:
