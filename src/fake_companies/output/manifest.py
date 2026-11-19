@@ -24,8 +24,9 @@ def build_manifest(
     """The run manifest for ``cfg`` (the *effective* config: after any
     overrides and anomaly selection, so ``config_hash`` identifies the bytes).
 
-    ``anomaly_selection`` is recorded only when it is not the default, so a
-    default run's manifest is exactly what it was before selection existed.
+    ``anomaly_selection``, ``regime`` and ``overrides`` (JSON, dotted path ->
+    value) are recorded only when they are not the default, so a default run's
+    manifest is exactly what it was before any of them existed.
     """
     manifest = {
         "tool_version": TOOL_VERSION,
@@ -41,6 +42,10 @@ def build_manifest(
     }
     if anomaly_selection != "all":
         manifest["anomaly_selection"] = anomaly_selection
+    if cfg.regime is not None:
+        manifest["regime"] = cfg.regime
+    if cfg.applied_overrides:
+        manifest["overrides"] = json.dumps(cfg.applied_overrides, sort_keys=True, default=str)
     return manifest
 
 

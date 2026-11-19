@@ -28,14 +28,27 @@ def generate(
         help="all (default) | none | only:<name>[,<name>...] (named scripted anomalies, "
         "no surprise sampling).",
     ),
+    set_: list[str] | None = typer.Option(
+        None,
+        "--set",
+        help="Override a config value by dotted path before validation, e.g. "
+        "--set timeline.days=1095 (repeatable; value is YAML; '*' matches every key).",
+    ),
+    regime: str | None = typer.Option(
+        None,
+        "--regime",
+        help="Named baseline regime from configs/regimes/<vertical>.yaml "
+        "(flat, declining, accelerating, long_history, no_seasonality).",
+    ),
 ) -> None:
     """Generate a company's raw data into a DuckDB database."""
     from .anomalies import select_anomalies
     from .config import load_config
+    from .config.overrides import parse_overrides
     from .generate import run_generation
 
-    cfg = load_config(config)
     try:
+        cfg = load_config(config, overrides=parse_overrides(set_), regime=regime)
         select_anomalies(cfg, anomalies)  # fail on a bad selection before generating
     except ValueError as e:
         raise typer.BadParameter(str(e)) from None

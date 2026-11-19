@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 RATE_ANOMALY_TYPES = frozenset(
     {"spike", "drop", "level_shift", "trend_change", "seasonality_change", "ramp"}
@@ -221,6 +221,22 @@ class BaseScenarioConfig(_Base):
     noise: NoiseConfig = Field(default_factory=NoiseConfig)
     loading: LoadingConfig
     anomalies: AnomaliesConfig = Field(default_factory=AnomaliesConfig)
+
+    # Provenance, not configuration: what ``load_config`` changed on the way in.
+    # Private, so it is in neither the model dump nor the config hash — the
+    # hash already covers the overridden values themselves.
+    _applied_overrides: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _regime: str | None = PrivateAttr(default=None)
+
+    @property
+    def applied_overrides(self) -> dict[str, Any]:
+        """Dotted-path overrides (regime + ``--set``) applied at load time."""
+        return dict(self._applied_overrides)
+
+    @property
+    def regime(self) -> str | None:
+        """The named regime this config was loaded under, if any."""
+        return self._regime
 
     @model_validator(mode="after")
     def _cross_checks(self) -> BaseScenarioConfig:
