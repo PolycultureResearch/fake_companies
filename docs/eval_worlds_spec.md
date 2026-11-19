@@ -434,9 +434,11 @@ subscription-day model), so each vertical names its stocks
   larger fault: with too few placebo windows the standard error fell back to
   sigma/√n, which is far too small for noise that persists from day to day
   (product events under a 17-week anomaly "moved" in ten of ten seeds, in
-  both directions). The placebo spread is now used whenever six windows
-  exist, and the fallback is widened by the lag-one autocorrelation of the
-  difference. No cross-seed number in §9 depends on `moved`.
+  both directions). Where the twins already differ before the anomaly, the
+  standard error is now the measured spread of window-length means over those
+  days; where they were aligned, it is the smaller of the placebo spread and
+  sigma/√n widened by the lag-one autocorrelation of the difference. No
+  cross-seed number in §9 depends on `moved`.
 - *Ratios whose sides aggregate differently.* `metrics[].time_aggregation` is
   `ratio_of_sums` only when both sides are sums, otherwise
   `ratio_of_aggregates`, and `input_time_aggregation` gives each side's rule.

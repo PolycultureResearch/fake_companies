@@ -56,17 +56,24 @@ Did it move?
 ``z_window`` is the mean difference over the anomaly's declared window (on
 the days the metric is live) divided by the standard error of that mean:
 
-- for a flow, the RMS of the mean difference over *placebo windows* —
-  windows of the anomaly's length elsewhere in the same twin — when the
-  timeline has at least ``MIN_PLACEBO_WINDOWS`` of them. This is the noise of
-  a window mean measured directly, whatever its correlation: re-dealt timing
-  (a return-rate anomaly re-deals the request delay of every later return)
-  cancels inside a window and gives a small value; persistent noise (two
-  different sets of users are active in the twins, and stay different for
-  weeks) gives a large one. Placebo windows that sit after a lasting effect
-  contain it, which widens the estimate and errs towards "not detected";
-- for a flow on a timeline too short for that, ``sigma / sqrt(n)`` widened
-  by the day-to-day persistence of the difference outside the window;
+- for a flow whose twins already differed before the anomaly (with at least
+  1.5 window lengths of such days): the RMS of the mean difference over
+  every window of the anomaly's length before it. That is the noise of a
+  window mean, measured directly, with nothing causal in it. It matters when
+  the noise persists: two different sets of users are active in the twins
+  and stay different for weeks, and ``sigma / sqrt(n)`` would call that
+  wander a ten-sigma effect;
+- for a flow whose twins were aligned until the anomaly, the smaller of two
+  estimates, each of which can only be too large. (1) ``sigma / sqrt(n)``
+  widened by the day-to-day persistence of the difference outside the window
+  (``sqrt((1 + r) / (1 - r))`` for its lag-one autocorrelation ``r``). (2)
+  When the timeline has at least ``MIN_PLACEBO_WINDOWS`` of them, the RMS of
+  the mean difference over *placebo windows* — windows of the anomaly's
+  length elsewhere in the same twin. That one sees noise that cancels: a
+  return-rate anomaly re-deals the request delay of every later return,
+  which moves returns between days and nets out inside a window. Placebo
+  windows after a lasting effect (a ramp holds its level) contain the effect
+  and are useless there, which is why (1) is kept beside it;
 - for a stock-like series (MRR, active subscriptions, open pipeline), whose
   noise accumulates like a random walk and does not average out, the level
   noise expected at the window: ``pre_onset_rms_diff * sqrt(2 t / T)``, with
@@ -195,6 +202,33 @@ def _placebo_se(diff: np.ndarray, active: np.ndarray, w0: int, w1: int) -> float
     return float(np.sqrt(np.mean(np.square(means))))
 
 
+def _pre_onset_se(diff: np.ndarray, active: np.ndarray, w0: int, length: int) -> float | None:
+    """Noise of a window-length mean, from the days before the anomaly.
+
+    The RMS of the mean difference over every window of ``length`` days that
+    ends before day ``w0`` and starts after the twins first differ. ``None``
+    when the twins were aligned before the anomaly or fewer than
+    ``1.5 * length`` diverged days precede it.
+    """
+    usable = active & ~np.isnan(diff)
+    nonzero = np.flatnonzero(usable[:w0] & (diff[:w0] != 0))
+    if nonzero.size == 0:
+        return None
+    first = int(nonzero[0])
+    if w0 - first < 1.5 * length:
+        return None
+    vals = np.where(usable[first:w0], np.nan_to_num(diff[first:w0]), 0.0)
+    cnt = usable[first:w0].astype(float)
+    csum = np.concatenate([[0.0], np.cumsum(vals)])
+    ccnt = np.concatenate([[0.0], np.cumsum(cnt)])
+    sums = csum[length:] - csum[:-length]
+    counts = ccnt[length:] - ccnt[:-length]
+    means = sums[counts > 0] / counts[counts > 0]
+    if means.size == 0:
+        return None
+    return float(np.sqrt(np.mean(means**2)))
+
+
 def _persistence(diff: np.ndarray, active: np.ndarray, w0: int, w1: int) -> float:
     """How much wider than ``sigma / sqrt(n)`` the error of a window mean is
     when the noise persists from day to day: ``sqrt((1 + r) / (1 - r))`` for a
@@ -236,13 +270,19 @@ def _window_z(
     mean = float(diff[live].mean())
     if stock_se is not None:
         return (mean / stock_se if stock_se > 0 else None), False
-    placebo = _placebo_se(diff, active, w0, w1)
-    if placebo is not None:
-        se = placebo
-    else:
-        # Too short a timeline for placebo windows: independent days, widened
-        # for the day-to-day persistence the noise actually has.
-        se = sigma / np.sqrt(n) * _persistence(diff, active, w0, w1)
+    # Best: the twins already differed before the anomaly, so the spread of
+    # window-length means there is the noise of a window mean, measured, with
+    # nothing causal in it.
+    se = _pre_onset_se(diff, active, w0, w1 - w0 + 1)
+    placebo = None
+    if se is None:
+        placebo = _placebo_se(diff, active, w0, w1)
+        # Independent days, widened for the day-to-day persistence of the noise.
+        modelled = sigma / np.sqrt(n) * _persistence(diff, active, w0, w1)
+        # The smaller of the two: each fails upwards. Placebo windows after a
+        # lasting effect (a ramp holds its level) contain the effect itself,
+        # and the persistence estimate is inflated by the same thing but capped.
+        se = modelled if placebo is None else min(placebo, modelled)
     if se > 0:
         return mean / se, False
     return None, placebo == 0.0 and mean != 0

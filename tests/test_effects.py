@@ -562,3 +562,22 @@ def test_reshuffled_timing_does_not_hide_a_sparse_effect():
     assert row["pre_onset_rms_diff"] == 0 and row["first_diff"] == start
     assert row["rel_change"] == pytest.approx(0.5, abs=0.15)
     assert row["moved"] and row["z_window"] > NOISE_K
+
+
+def test_an_effect_that_lasts_is_not_drowned_by_its_own_aftermath():
+    """A ramp holds its new level to the end of the timeline. Every placebo
+    window after it contains the effect, so the placebo spread alone would
+    call an exact, noise-free +35% unmoved."""
+    days = pd.date_range("2024-01-01", periods=600, freq="D")
+    start, end = dt.date(2024, 7, 1), dt.date(2024, 8, 11)
+    null = np.full(len(days), 1000.0)
+    world = null.copy()
+    i0 = int(np.searchsorted(days, pd.Timestamp(start)))
+    i1 = int(np.searchsorted(days, pd.Timestamp(end)))
+    world[i0 : i1 + 1] *= 1 + 0.35 * np.arange(i1 - i0 + 1) / (i1 - i0)
+    world[i1 + 1 :] *= 1.35
+    frame = pd.DataFrame({"date": days, "metric": "m", "dimension": None, "value": None})
+    effects = twin_effects(frame.assign(v=null), frame.assign(v=world), {})
+    row = summarize_twin(effects, start, end).iloc[0]
+    assert row["moved"] and row["first_diff"] == start + dt.timedelta(days=1)
+    assert row["rel_change"] == pytest.approx(0.175, abs=0.01)
