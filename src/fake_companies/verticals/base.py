@@ -43,6 +43,11 @@ class RootLabel:
 
     metric: str
     slice: dict[str, str] = field(default_factory=dict)
+    # The rate the driver is named after, when the root is its numerator
+    # count because MetricFlow cannot slice the rate (return_rate.<cat> roots
+    # at returned_units; the rate is return_rate). A tree whose node is the
+    # rate matches on this.
+    rate: str | None = None
 
     @property
     def dimension(self) -> str | None:
@@ -62,8 +67,16 @@ class RootLabel:
 RootRule = tuple[str, str, str | None, dict[str, str]]
 
 
-def resolve_root(rules: list[RootRule], driver: str, segment: dict[str, str] | None) -> RootLabel:
-    """Look ``driver`` up in a vertical's root table and build its label."""
+def resolve_root(
+    rules: list[RootRule],
+    driver: str,
+    segment: dict[str, str] | None,
+    rates: dict[str, str] | None = None,
+) -> RootLabel:
+    """Look ``driver`` up in a vertical's root table and build its label.
+
+    ``rates`` maps a root metric that is a numerator count to the rate metric
+    the driver is named after."""
     for prefix, metric, member_dim, segment_dims in rules:
         if prefix.endswith("."):
             if not driver.startswith(prefix):
@@ -80,7 +93,7 @@ def resolve_root(rules: list[RootRule], driver: str, segment: dict[str, str] | N
             dim = segment_dims.get(key)
             if dim is not None and dim not in where:
                 where[dim] = segment[key]  # type: ignore[index]
-        return RootLabel(metric, where)
+        return RootLabel(metric, where, (rates or {}).get(metric))
     raise KeyError(f"driver {driver!r} has no root metric")
 
 

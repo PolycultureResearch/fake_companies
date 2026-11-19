@@ -112,5 +112,10 @@ def affected_metrics_for_driver(driver: str) -> list[str]:
     return ["mrr"]  # every SaaS driver ultimately feeds MRR
 
 
+# Roots that are a rate's numerator count -> the rate itself (not sliceable by
+# one MetricFlow group-by, which is why it is not the root).
+_ROOT_RATES = {"churned_subscriptions": "customer_churn_rate"}
+
+
 def root_label_for_driver(driver: str, segment: dict[str, str] | None = None) -> RootLabel:
-    return resolve_root(_ROOTS, driver, segment)
+    return resolve_root(_ROOTS, driver, segment, _ROOT_RATES)

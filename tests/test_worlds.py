@@ -169,9 +169,13 @@ def test_every_world_has_a_series_file(retail_set):
         sliced = series[series["dimension"].notna()]
         assert set(zip(sliced["metric"], sliced["dimension"])) == listed
         assert not sliced["dimension"].str.contains(",").any()
-        ratios = series["metric"].map(lambda m: by_name[m].type == "ratio")
-        assert series.loc[ratios, ["numerator", "denominator"]].notna().all().all()
-        assert series.loc[~ratios, ["numerator", "denominator"]].isna().all().all()
+        sided = series["metric"].map(lambda m: by_name[m].has_sides)
+        assert series.loc[sided, ["numerator", "denominator"]].notna().all().all()
+        assert series.loc[~sided, ["numerator", "denominator"]].isna().all().all()
+    assert {m.name for m in manifest.metrics if m.has_sides} == {
+        *(m.name for m in manifest.metrics if m.type == "ratio"),
+        "avg_fulfillment_days",
+    }
 
 
 def test_series_are_the_values_behind_the_effects(retail_set):
@@ -217,6 +221,131 @@ def test_weekly_ratio_from_the_series_sides(retail_set):
     assert not np.allclose(
         from_sides.to_numpy(), rate.groupby(week)["metric_value"].mean().to_numpy()
     )
+
+
+def test_weekly_average_from_the_series_sides(retail_set):
+    """An average carries its sum and row count: the weekly mean is the sum
+    of sums over the sum of counts, exactly, and not the mean of daily means."""
+    out, manifest = retail_set
+    null = manifest.worlds[0]
+    series = pd.read_parquet(out / null.series)
+    avg = series[(series["metric"] == "avg_fulfillment_days") & series["dimension"].isna()]
+    defined = avg["denominator"] > 0
+    assert np.allclose(
+        avg.loc[defined, "metric_value"],
+        avg.loc[defined, "numerator"] / avg.loc[defined, "denominator"],
+    )
+    orders = pd.read_parquet(out / null.path / "shop_db.orders.parquet")
+    ship = pd.read_parquet(out / null.path / "fulfillment.shipments.parquet")
+    joined = orders.merge(ship[["order_id", "delivered_at"]], on="order_id")
+    days = (
+        pd.to_datetime(joined["delivered_at"]).dt.normalize()
+        - pd.to_datetime(joined["placed_at"]).dt.normalize()
+    ).dt.days
+    week = pd.to_datetime(joined["placed_at"]).dt.to_period("W")
+    truth = days.groupby(week.to_numpy()).mean().dropna()
+    wk = pd.to_datetime(avg["date"]).dt.to_period("W").to_numpy()
+    ours = (avg.groupby(wk)["numerator"].sum() / avg.groupby(wk)["denominator"].sum()).dropna()
+    assert np.allclose(ours.to_numpy(), truth.reindex(ours.index).to_numpy())
+
+
+def test_manifest_says_how_each_side_of_a_ratio_aggregates(tmp_path):
+    """customer_churn_rate divides a flow by a stock: summing both sides over
+    a week is wrong by about a factor of seven, and the manifest says so."""
+    manifest = build_world_set(
+        REPO_ROOT / "configs" / "smoke_90d.yaml", tmp_path, seeds=[0], null=True, raw=False
+    )
+    by_name = {m.name: m for m in manifest.metrics}
+    churn = by_name["customer_churn_rate"]
+    assert churn.time_aggregation == "ratio_of_aggregates"
+    assert churn.inputs == {
+        "numerator": "churned_subscriptions",
+        "denominator": "active_subscriptions",
+    }
+    assert churn.input_time_aggregation == {"numerator": "sum", "denominator": "end_of_period"}
+    rate = by_name["visit_signup_rate"]
+    assert rate.time_aggregation == "ratio_of_sums"
+    assert rate.input_time_aggregation == {"numerator": "sum", "denominator": "sum"}
+    # a stock that is a distinct count, and says so
+    active = by_name["active_subscriptions"]
+    assert (active.time_aggregation, active.measure_agg) == ("end_of_period", "count_distinct")
+    assert by_name["mrr"].measure_agg == "sum" and churn.measure_agg is None
+    # derived metrics: a tree, not SQL to parse
+    arpu = by_name["arpu"]
+    assert arpu.formula == {
+        "op": "/",
+        "args": [
+            {"metric": "mrr"},
+            {"op": "nullif_zero", "args": [{"metric": "active_subscriptions"}]},
+        ],
+    }
+    assert arpu.input_time_aggregation == {
+        "mrr": "end_of_period",
+        "active_subscriptions": "end_of_period",
+    }
+    assert by_name["mrr"].formula is None
+
+
+def test_formula_parser():
+    from fake_companies.semantic import _parse_formula
+
+    names = {"a": "m_a", "b": "m_b"}
+    assert _parse_formula("a - b * 2", names) == {
+        "op": "-",
+        "args": [{"metric": "m_a"}, {"op": "*", "args": [{"metric": "m_b"}, {"const": 2.0}]}],
+    }
+    assert _parse_formula("-(a)", names) == {"op": "neg", "args": [{"metric": "m_a"}]}
+    for bad in ("a + c", "coalesce(a, 0)", "nullif(a, 1)", "a +", "a b"):
+        with pytest.raises(ValueError):
+            _parse_formula(bad, names)
+
+
+def test_a_twin_has_a_summary_row_for_every_slice(retail_set):
+    """A node bound to a slice (paid sessions = sessions where channel is
+    paid_search) looks its measured effect up in the twin's summary table."""
+    out, manifest = retail_set
+    world = manifest.world("retail_smoke.baseline.s0.only.mobile_checkout_regression")
+    summary = pd.read_parquet(out / world.effects_summary)
+    series = pd.read_parquet(out / world.series)
+    keys = ["metric", "dimension", "value"]
+    have = {tuple(x) for x in _keyed(summary)[keys].itertuples(index=False)}
+    want = {tuple(x) for x in _keyed(series)[keys].drop_duplicates().itertuples(index=False)}
+    assert want <= have, "every series row has measured stats"
+    row = summary[
+        (summary["metric"] == "converting_sessions")
+        & (summary["dimension"] == "channel")
+        & (summary["value"] == "paid_search")
+    ].iloc[0]
+    assert row["moved"] and row["rel_change"] < -0.25
+    untouched = summary[
+        (summary["metric"] == "converting_sessions")
+        & (summary["dimension"] == "channel")
+        & (summary["value"] == "organic")
+    ].iloc[0]
+    assert not untouched["differs"] and not untouched["moved"]
+    truth = json.loads((out / world.ground_truth).read_text())[0]
+    totals = summary[summary["dimension"].isna()].set_index("metric")
+    for metric, stats in truth["measured_effects"].items():
+        assert bool(totals.loc[metric, "moved"]) == stats["moved"]
+
+
+def test_set_summary_has_a_verdict_per_anomaly_and_metric(retail_set):
+    out, manifest = retail_set
+    summary = pd.read_parquet(out / manifest.effects_summary)
+    assert set(summary["verdict"]) <= {
+        "established_up",
+        "established_down",
+        "open",
+        "exactly_zero",
+        "undefined",
+    }
+    rows = summary[summary["anomaly"] == "mobile_checkout_regression"]
+    total = rows[rows["dimension"].isna()].set_index("metric")
+    assert total.loc["sessions", "verdict"] == "exactly_zero"  # upstream of the anomaly
+    assert total.loc["marketing_spend", "verdict"] == "exactly_zero"
+    root = rows[(rows["metric"] == "conversion_rate") & (rows["dimension"] == "channel,device")]
+    root = root[root["value"] == "paid_search,mobile"].iloc[0]
+    assert root["rel_change_mean"] < -0.5 and root["moved_share"] == 1.0
 
 
 def test_no_raw_and_no_series(tmp_path):

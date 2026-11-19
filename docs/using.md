@@ -257,6 +257,11 @@ bytes, whichever other worlds are in the set.
   `first_diff` (the first day the twins differ at all), `onset` / `offset`
   (first and last day over the floor), `days_over_floor`, `z_window` /
   `z_extended` (the window test) and `moved`.
+- `root_metric_rate`: when the root is a rate's numerator count (a
+  `return_rate.<category>` anomaly roots at `returned_units`, a `churn.<plan>`
+  anomaly at `churned_subscriptions`, because MetricFlow cannot slice those
+  ratios), the rate itself (`return_rate`, `customer_churn_rate`). A tree whose
+  node is the rate matches on this. Null otherwise. Written by every run.
 - `metrics_moved`: every metric whose total moved, declared or not. `[]` means
   the anomaly moved no metric — true of most data-quality anomalies, whose
   truth is in `affected_signals`.
@@ -270,6 +275,29 @@ bytes, whichever other worlds are in the set.
 metric of the vertical (`dimension` and `value` are null for the total; the
 slices are the anomaly's root slice and each of its dimensions).
 
+**Which date to use.** `first_diff` is the first day the twins differ at all.
+When that series' `pre_onset_rms_diff` is 0 the twins were identical until the
+anomaly, so `first_diff` is the exact day the effect arrives: prefer it. `onset`
+is the first day the difference clears the noise floor, which is when a
+detector could first see it — for a ramp or a trend change that is by design
+two to three weeks after the start, and for a sparse metric it may never
+happen (`onset` null). Use `onset` only when `pre_onset_rms_diff` is not 0
+(then `first_diff` is just the first noisy day).
+
+**`*.effects_summary.parquet`** (single worlds) has those same stats for every
+row of the effects table: the total of every metric, every single-dimension
+slice in the series file, and the anomaly's root slice. The ground truth's
+`measured_effects` is its totals only; a node bound to a slice (paid sessions =
+`sessions` where `channel` is `paid_search`) looks itself up here by `metric`,
+`dimension`, `value`.
+
+**One verdict per anomaly and metric.** A twin's `moved` is one seed's opinion
+and it flips between seeds for small effects. `effects_summary.parquet` at the
+set root has a `verdict` per regime, anomaly, metric and slice:
+`established_up` / `established_down` (the mean across seeds is far enough from
+zero by the seeds' own spread, two-sided 1%), `open`, `exactly_zero` (no seed's
+twins ever differ) or `undefined`. Choose targets from it, not from one world.
+
 **`*.series.parquet`** (every world: null, single, story) is the daily series
 of every metric, as MetricFlow would return it, so a consumer needs neither dbt
 nor the raw tables: `date`, `metric`, `dimension`, `value`, `metric_value`,
@@ -277,12 +305,28 @@ nor the raw tables: `date`, `metric`, `dimension`, `value`, `metric_value`,
 and one slice per dimension listed for the metric in `worlds.json` →
 `metrics[].dimensions`. Every timeline day is present; `metric_value` is null
 where the metric is undefined (a ratio over zero). `numerator` / `denominator`
-are filled for ratio metrics only: to get a weekly or monthly ratio, sum both
-and divide — do not average the daily ratios. `metrics[].time_aggregation` says
-how each metric combines over time: `sum`, `end_of_period` (a stock: MRR, open
-pipeline), `ratio_of_sums`, `derived` (recompute `expr` from `inputs` after
-aggregating each), `average`, `count_distinct` (DAU: not derivable for a longer
-period from its days) or `rolling_window` (WAU).
+are filled where `metrics[].has_sides` is true: ratio metrics (their two input
+metrics) and averages (the sum and the row count). `metrics[].time_aggregation`
+says how each metric combines over time:
+
+- `sum`; `end_of_period` (a stock: MRR, open pipeline — take the last day);
+- `ratio_of_sums`: sum `numerator` and `denominator`, then divide (never
+  average daily ratios); `average` works the same way from its sides;
+- `ratio_of_aggregates`: a ratio with a side that is not a sum.
+  `customer_churn_rate` divides churned subscriptions (a flow) by active
+  subscriptions (a stock); aggregate each side by
+  `metrics[].input_time_aggregation` and then divide;
+- `derived`: aggregate each input by `input_time_aggregation`, then evaluate
+  `formula`, a tree of `{"metric"}`, `{"const"}` and `{"op", "args"}` nodes
+  (`+ - * /`, `neg`, `nullif_zero`); `expr` is the same thing as SQL text;
+- `count_distinct` (DAU) and `rolling_window` (WAU): not derivable for a
+  longer period from the days.
+
+`metrics[].measure_agg` is the measure's own aggregation. A stock with
+`measure_agg: count_distinct` (`active_subscriptions`) is the distinct count
+on each day; its end-of-week value is the last day's count, which is not what
+MetricFlow returns at week grain (distinct over the whole week). The series
+file cannot answer that number.
 
 **Read the measured numbers as effect plus noise.** A single world and its null
 twin share a seed, but most entity builders draw for the whole timeline from one

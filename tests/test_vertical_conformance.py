@@ -132,6 +132,10 @@ def test_every_driver_has_a_root_metric(name, smoke_cfgs):
             assert addressable.get(dim), (
                 f"driver {driver!r}: root {label.metric!r} has no MetricFlow dimension {dim!r}"
             )
+        if label.rate is not None:
+            assert label.rate in layer.metrics, (driver, label.rate)
+            assert layer.metrics[label.rate].kind == "ratio"
+            assert label.metric == layer.metrics[label.rate].inputs["num"], (driver, label)
         if "." in driver:
             member = driver.split(".", 1)[1]
             assert member in label.slice.values() or not label.slice, (driver, label)
@@ -183,6 +187,12 @@ def test_root_label_rules():
     }
     with pytest.raises(KeyError):
         retail.root_label("not_a_driver")
+    # A root that is a rate's numerator count also names the rate.
+    assert retail.root_label("return_rate.jackets") == RootLabel(
+        "returned_units", {"category": "jackets"}, "return_rate"
+    )
+    assert REGISTRY["b2c_saas"].root_label("churn.pro").rate == "customer_churn_rate"
+    assert retail.root_label("spend.paid_social").rate is None
 
 
 @pytest.mark.parametrize("name", VERTICALS)

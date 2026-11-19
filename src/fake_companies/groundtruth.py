@@ -41,6 +41,9 @@ class GroundTruthRecord(BaseModel):
     root_dimension: str | None = None
     root_value: str | None = None
     root_slice: dict[str, str] | None = None
+    # When the root is a rate's numerator count (returned_units,
+    # churned_subscriptions), the rate metric itself; otherwise null.
+    root_metric_rate: str | None = None
 
     # --- Measured truth (single worlds of a world set only) ----------------- #
     # Filled from the difference between a single world and its null twin; see

@@ -256,7 +256,13 @@ Ordered by what Breakdown's evaluation needs next. Each is its own change.
    and binomial, so a tool tuned here is tuned to those.
 5. **Longer and shorter histories as first-class regimes,** including a
    company with under a year of data.
-6. **Blind sets.** A `worlds --blind` layout that writes ground truth and
+6. **Metrics the trees need and the semantic layers lack** (found by
+   Breakdown's runner): a `discounted_orders` metric in retail; a stock
+   metric in retail and in wholesale (neither vertical has one, so a tree
+   there cannot have a stock node); weekly and monthly distinct counts
+   (`active_subscriptions`, `dau` at a coarser grain are not derivable from
+   the daily series — a second, coarser-grain series file would answer them).
+7. **Blind sets.** A `worlds --blind` layout that writes ground truth and
    effects to a separate directory, so an agent can be handed the data alone.
 
 ## 6. Not in scope
@@ -418,6 +424,40 @@ The semantic YAML cannot say that a metric is a stock (MRR is a `sum` over a
 subscription-day model), so each vertical names its stocks
 (`STOCK_METRICS` in `metrics.py`). `--no-raw` skips the raw tables; a world's
 `path` is then null.
+
+**Findings from Breakdown's runner, after it read the sets end to end.**
+
+- *A degenerate `moved`.* A series with nothing in its declared window
+  (`rel_change` 0, `z_window` 0) was `moved` because the stretched window
+  alone cleared the bar. The stretched window now counts only when the
+  declared one points the same way with |z| ≥ 1. The same review found a
+  larger fault: with too few placebo windows the standard error fell back to
+  sigma/√n, which is far too small for noise that persists from day to day
+  (product events under a 17-week anomaly "moved" in ten of ten seeds, in
+  both directions). The placebo spread is now used whenever six windows
+  exist, and the fallback is widened by the lag-one autocorrelation of the
+  difference. No cross-seed number in §9 depends on `moved`.
+- *Ratios whose sides aggregate differently.* `metrics[].time_aggregation` is
+  `ratio_of_sums` only when both sides are sums, otherwise
+  `ratio_of_aggregates`, and `input_time_aggregation` gives each side's rule.
+- *A stock that is a distinct count.* `metrics[].measure_agg` says so. The
+  weekly MetricFlow value (distinct over the week) is not in the series file;
+  recorded under phase 2.
+- *Roots on numerator counts.* `root_metric_rate` names the rate.
+- *Ramps.* `onset` is when the effect clears the noise, by design weeks
+  after a ramp starts; `first_diff` is exact when the twins were aligned.
+  `docs/using.md` says which to use when.
+- *Slices.* Every twin has `<world>.effects_summary.parquet` with the stats
+  of every slice in the series file; the effects table covers the same
+  slices. The JSON keeps totals only, for size.
+- *One verdict per anomaly and metric.* `effects_summary.parquet` has
+  `verdict` (established up or down at two-sided 1%, open, exactly zero).
+- *Structured formulas.* `metrics[].formula` is the derived expression as a
+  tree.
+- *Averages.* Their series carry the sum and the row count as
+  `numerator` / `denominator`, so `sales_cycle_days` can be served weekly.
+- The remaining gaps (a discounted-orders metric, stocks in retail and
+  wholesale, coarser-grain distinct counts) are listed under phase 2.
 
 **Declared `affected_metrics` corrected where they were wrong by
 construction.** Phase 1 left the hand-kept map alone and recorded the

@@ -222,6 +222,7 @@ def test_cross_seed_summary():
                 "onset": START + dt.timedelta(days=seed),
                 "offset": END,
                 "days_over_floor": 10,
+                "differs": True,
                 "z_window": -9.0,
                 "moved": seed != 2,
             }
@@ -233,7 +234,65 @@ def test_cross_seed_summary():
     assert out["rel_change_sem"] == pytest.approx(0.04 / np.sqrt(3))
     assert out["t_across_seeds"] == pytest.approx(-0.30 / (0.04 / np.sqrt(3)))
     assert out["moved_share"] == pytest.approx(2 / 3)
+    # -13 standard errors, but with three seeds the bar is t(2) = 9.9
+    assert out["verdict"] == "established_down" and out["differs_share"] == 1.0
     assert out["onset_median_lag_days"] == 1
+
+
+def test_set_verdict():
+    from fake_companies.effects import set_verdict, t_critical
+
+    assert t_critical(10) == pytest.approx(3.250) and t_critical(3) == pytest.approx(9.925)
+    assert t_critical(1) == float("inf") and t_critical(500) == pytest.approx(2.576)
+    assert set_verdict(-0.05, 0.01, 10, 1.0) == "established_down"  # t = -15.8
+    assert set_verdict(+0.05, 0.01, 10, 1.0) == "established_up"
+    assert set_verdict(-0.05, 0.10, 10, 1.0) == "open"  # t = -1.6
+    assert set_verdict(-0.05, 0.02, 3, 1.0) == "open"  # t = -4.3, three seeds need 9.9
+    assert set_verdict(0.0, 0.0, 10, 0.0) == "exactly_zero"
+    assert set_verdict(0.0, 0.0, 10, 0.4) == "open"  # differs, nets to nothing
+    assert set_verdict(float("nan"), float("nan"), 10, 1.0) == "undefined"
+    assert set_verdict(-0.5, 0.0, 10, 1.0) == "established_down"  # a driver-level exact cut
+    assert set_verdict(-0.5, float("nan"), 1, 1.0) == "open"  # one seed settles nothing
+
+
+def test_persistent_noise_is_not_mistaken_for_an_effect():
+    """Two realizations of an activity metric differ by a slowly wandering
+    amount (different users are active, and stay different for weeks). Over a
+    long window sigma/sqrt(n) calls that wander a ten-sigma effect; placebo
+    windows, or the persistence correction on a short timeline, do not."""
+    for periods, start, end in (
+        (790, dt.date(2025, 8, 4), dt.date(2025, 11, 30)),  # placebo windows exist
+        (200, dt.date(2024, 3, 1), dt.date(2024, 5, 15)),  # too short: persistence correction
+    ):
+        days = pd.date_range("2024-01-01", periods=periods, freq="D")
+        flagged = 0
+        for seed in range(20):
+            rng = np.random.default_rng(seed)
+            wander = np.zeros(periods)
+            shocks = rng.normal(0, 1, periods)
+            for i in range(1, periods):  # AR(1), r = 0.9: persistent, not a random walk
+                wander[i] = 0.9 * wander[i - 1] + shocks[i]
+            null = 1000 + rng.normal(0, 1, periods)
+            frame = pd.DataFrame({"date": days, "metric": "m", "dimension": None, "value": None})
+            effects = twin_effects(frame.assign(v=null), frame.assign(v=null + wander), {})
+            flagged += bool(summarize_twin(effects, start, end).iloc[0]["moved"])
+        assert flagged <= 2, (periods, flagged)
+
+
+def test_a_stretched_window_alone_does_not_move():
+    """Nothing in the declared window and a drift after it is what noise looks
+    like (the runner's report: moved with rel_change 0 and z_window 0)."""
+    rng = np.random.default_rng(7)
+    null = 100 + rng.normal(0, 1, len(DAYS))
+    world = null + rng.normal(0, 1, len(DAYS))
+    after = np.asarray(DAYS > pd.Timestamp(END)) & np.asarray(
+        DAYS <= pd.Timestamp(END) + pd.Timedelta(days=19)
+    )
+    world[_window()] = null[_window()]  # exactly nothing in the window
+    world[after] -= 6
+    row = _summary(null, world)
+    assert row["z_window"] == 0.0 and abs(row["z_extended"]) >= NOISE_K
+    assert not row["moved"]
 
 
 # --------------------------------------------------------------------------- #

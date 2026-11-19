@@ -140,8 +140,15 @@ def test_series_match_metricflow(config_name, tmp_path):
     for name in names:
         metric = layer.metrics[name]
         rows = mine[(mine["metric"] == name) & mine["dimension"].isna()].set_index("date")
-        if metric.kind != "ratio":
+        if not layer.has_sides(name):
             assert rows["numerator"].isna().all() and rows["denominator"].isna().all(), name
+            continue
+        if metric.kind != "ratio":  # an average: its sum over its row count
+            has = rows["denominator"] > 0
+            assert np.allclose(
+                rows.loc[has, "v"], rows.loc[has, "numerator"] / rows.loc[has, "denominator"]
+            ), name
+            assert rows.loc[~has, "v"].isna().all(), name
             continue
         for side, column in (("num", "numerator"), ("den", "denominator")):
             theirs = mf[metric.inputs[side]].reindex(rows.index).fillna(0.0).to_numpy(dtype=float)

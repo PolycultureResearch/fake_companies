@@ -56,13 +56,17 @@ Did it move?
 ``z_window`` is the mean difference over the anomaly's declared window (on
 the days the metric is live) divided by the standard error of that mean:
 
-- for a flow, ``sigma / sqrt(n)`` (independent daily noise), or, when the
-  timeline is long enough to have at least ``MIN_PLACEBO_WINDOWS`` of them,
-  the RMS of the mean difference over *placebo windows* — windows of the
-  anomaly's length elsewhere in the same twin — if that is smaller. It is
-  smaller when the noise is re-dealt timing: a return-rate anomaly re-deals
-  the request delay of every later return, which moves returns between days
-  and cancels within a window;
+- for a flow, the RMS of the mean difference over *placebo windows* —
+  windows of the anomaly's length elsewhere in the same twin — when the
+  timeline has at least ``MIN_PLACEBO_WINDOWS`` of them. This is the noise of
+  a window mean measured directly, whatever its correlation: re-dealt timing
+  (a return-rate anomaly re-deals the request delay of every later return)
+  cancels inside a window and gives a small value; persistent noise (two
+  different sets of users are active in the twins, and stay different for
+  weeks) gives a large one. Placebo windows that sit after a lasting effect
+  contain it, which widens the estimate and errs towards "not detected";
+- for a flow on a timeline too short for that, ``sigma / sqrt(n)`` widened
+  by the day-to-day persistence of the difference outside the window;
 - for a stock-like series (MRR, active subscriptions, open pipeline), whose
   noise accumulates like a random walk and does not average out, the level
   noise expected at the window: ``pre_onset_rms_diff * sqrt(2 t / T)``, with
@@ -72,9 +76,17 @@ the days the metric is live) divided by the standard error of that mean:
 
 ``z_extended`` is the same over the window stretched by its own length, for
 an effect that lands late (returns follow orders by two weeks). A series
-``moved`` when ``|z_window|`` or ``|z_extended|`` reaches ``NOISE_K``, or
-when there is no noise to compare with: none at all, or none outside the
-window.
+``moved`` when ``|z_window|`` reaches ``NOISE_K``; or when ``|z_extended|``
+does *and* the window itself points the same way with ``|z_window| >= 1``
+(a stretched window alone, with nothing in the declared one, is what noise
+looks like); or when there is no noise to compare with: none at all, or none
+outside the window.
+
+``moved`` is one twin's verdict and it is noisy: the same anomaly can clear
+the bar for a metric in one seed and miss it in the next. For a decision per
+anomaly and metric use the set-level ``verdict`` in
+``effects_summary.parquet``, which tests the mean across seeds against the
+seeds' own spread.
 
 What this cannot do: confirm a small causal effect from one twin. An anomaly
 that cuts orders by 4% is real and still inside one twin's noise; such a
@@ -98,7 +110,7 @@ INTEGRATED_RATIO = 3.0  # pre-onset level noise / step noise above which a serie
 MIN_STEPS_TO_TRIM = 6  # day-over-day steps needed before the two largest are set aside
 MIN_PRE_DAYS = 7  # pre-onset days needed to call a series stock-like
 FLOAT_RTOL = 1e-9  # twin values this close are the same number
-MIN_PLACEBO_WINDOWS = 8  # placebo windows needed to trust their spread
+MIN_PLACEBO_WINDOWS = 6  # placebo windows needed to trust their spread
 
 EFFECT_COLUMNS = ["date", "metric", "dimension", "value", "null_value", "world_value", "diff"]
 _KEYS = ["metric", "dimension", "value"]
@@ -183,6 +195,24 @@ def _placebo_se(diff: np.ndarray, active: np.ndarray, w0: int, w1: int) -> float
     return float(np.sqrt(np.mean(np.square(means))))
 
 
+def _persistence(diff: np.ndarray, active: np.ndarray, w0: int, w1: int) -> float:
+    """How much wider than ``sigma / sqrt(n)`` the error of a window mean is
+    when the noise persists from day to day: ``sqrt((1 + r) / (1 - r))`` for a
+    lag-one autocorrelation ``r`` of the difference outside the window
+    (never below 1; ``r`` capped at 0.95)."""
+    usable = active & ~np.isnan(diff)
+    usable[w0 : w1 + 1] = False
+    x = diff[usable]
+    if x.size < 8 or np.all(x == x[0]):
+        return 1.0
+    x = x - x.mean()
+    denom = float(np.dot(x, x))
+    if denom == 0:
+        return 1.0
+    r = float(np.clip(np.dot(x[:-1], x[1:]) / denom, 0.0, 0.95))
+    return float(np.sqrt((1.0 + r) / (1.0 - r)))
+
+
 def _window_z(
     diff: np.ndarray,
     active: np.ndarray,
@@ -207,8 +237,12 @@ def _window_z(
     if stock_se is not None:
         return (mean / stock_se if stock_se > 0 else None), False
     placebo = _placebo_se(diff, active, w0, w1)
-    white = sigma / np.sqrt(n)
-    se = white if placebo is None else min(white, placebo)
+    if placebo is not None:
+        se = placebo
+    else:
+        # Too short a timeline for placebo windows: independent days, widened
+        # for the day-to-day persistence the noise actually has.
+        se = sigma / np.sqrt(n) * _persistence(diff, active, w0, w1)
     if se > 0:
         return mean / se, False
     return None, placebo == 0.0 and mean != 0
@@ -241,7 +275,8 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
     - ``first_diff``: the first day on or after ``start`` on which the twins
       differ at all. When ``pre_onset_rms_diff`` is zero the streams were
       aligned until the anomaly, so this is the exact day the effect arrives;
-    - ``onset`` / ``offset`` / ``days_over_floor``;
+    - ``onset`` / ``offset`` / ``days_over_floor``, and ``differs`` (the
+      twins differ on at least one day of the timeline);
     - ``z_window`` / ``z_extended`` / ``stock_like`` / ``moved``: the window
       test;
     - ``rel_change_onset_to_offset``: the relative change over the measured
@@ -296,7 +331,15 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
         # No noise to compare with: either no noise at all (the streams never
         # diverged), or a twin that differs inside the window and nowhere else.
         exact = (sigma == 0 and n_over >= 1) or quiet
-        moved = exact or any(z is not None and abs(z) >= NOISE_K for z in (z_window, z_extended))
+        in_window = z_window is not None and abs(z_window) >= NOISE_K
+        late = (
+            z_extended is not None
+            and z_window is not None
+            and abs(z_extended) >= NOISE_K
+            and abs(z_window) >= 1.0
+            and np.sign(z_extended) == np.sign(z_window)
+        )
+        moved = exact or in_window or late
         rows.append(
             {
                 "metric": metric,
@@ -313,6 +356,7 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
                 "onset": onset,
                 "offset": offset,
                 "days_over_floor": n_over,
+                "differs": bool(np.any(diff[~np.isnan(diff)] != 0)),
                 "z_window": z_window,
                 "z_extended": z_extended,
                 "stock_like": bool(stock_like),
@@ -427,6 +471,48 @@ def ground_truth_fields(
 
 SUMMARY_KEYS = ["regime", "anomaly", "metric", "dimension", "value"]
 
+# Two-sided 1% points of Student's t by degrees of freedom (1..30), then normal.
+_T_CRIT_01 = [
+    63.657, 9.925, 5.841, 4.604, 4.032, 3.707, 3.499, 3.355, 3.250, 3.169,
+    3.106, 3.055, 3.012, 2.977, 2.947, 2.921, 2.898, 2.878, 2.861, 2.845,
+    2.831, 2.819, 2.807, 2.797, 2.787, 2.779, 2.771, 2.763, 2.756, 2.750,
+]  # fmt: skip
+
+
+def t_critical(n_seeds: int) -> float:
+    """The |t| a cross-seed mean must reach to be *established* (two-sided 1%)."""
+    df = n_seeds - 1
+    if df < 1:
+        return float("inf")
+    return _T_CRIT_01[df - 1] if df <= len(_T_CRIT_01) else 2.576
+
+
+def set_verdict(mean: float, sd: float, n_seeds: int, differs_share: float) -> str:
+    """One verdict per (anomaly, metric, slice) for the whole set.
+
+    - ``exactly_zero``: the twins never differ in any seed (the anomaly cannot
+      reach the metric, or reaches it only through aligned draws that did not
+      change);
+    - ``established_up`` / ``established_down``: the mean relative change
+      across seeds is at least :func:`t_critical` standard errors from zero
+      (two-sided 1%), judged by the seeds' own spread;
+    - ``open``: neither. More seeds may settle it.
+    - ``undefined``: no relative change exists (the null level is zero).
+
+    With one seed nothing can be established.
+    """
+    if differs_share == 0:  # no seed's twins differ on any day
+        return "exactly_zero"
+    if not np.isfinite(mean):
+        return "undefined"
+    if not np.isfinite(sd):
+        return "open"
+    if sd == 0:
+        return "open" if mean == 0 else ("established_up" if mean > 0 else "established_down")
+    if abs(mean) / (sd / np.sqrt(n_seeds)) >= t_critical(n_seeds):
+        return "established_up" if mean > 0 else "established_down"
+    return "open"
+
 
 def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
     """Cross-seed mean and spread of every effect: ``effects_summary.parquet``.
@@ -440,7 +526,12 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
       ``rel_change_sem`` (sd / sqrt(n)): the mean is the best estimate of the
       expected effect, the spread is how far one seed can be from it;
     - ``mean_diff_mean`` / ``mean_diff_sd``: the same in the metric's units;
-    - ``moved_share``: the share of seeds in which the series moved, and
+    - ``verdict``: :func:`set_verdict` — ``established_up``,
+      ``established_down``, ``open``, ``exactly_zero`` or ``undefined``. This
+      is the set's answer to "did this anomaly move this metric", and the one
+      to pick a target by;
+    - ``moved_share``: the share of seeds in which the series moved,
+      ``differs_share`` the share in which the twins differ on any day, and
       ``z_window_median``, the median window z across seeds;
     - ``t_across_seeds``: ``rel_change_mean / rel_change_sem`` — how many
       standard errors the mean effect is from zero, judged by the seeds'
@@ -472,6 +563,7 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
         mean_diff_sd=("mean_diff", "std"),
         null_mean=("null_mean", "mean"),
         moved_share=("moved", "mean"),
+        differs_share=("differs", "mean"),
         z_window_median=("z_window", "median"),
         noise_floor_mean=("noise_floor", "mean"),
         pre_onset_rms_diff_mean=("pre_onset_rms_diff", "mean"),
@@ -482,4 +574,10 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
     out["rel_change_sem"] = out["rel_change_sd"] / np.sqrt(out["n_seeds"])
     with np.errstate(divide="ignore", invalid="ignore"):
         out["t_across_seeds"] = out["rel_change_mean"] / out["rel_change_sem"]
+    out["verdict"] = [
+        set_verdict(mean, sd, n, differs)
+        for mean, sd, n, differs in zip(
+            out["rel_change_mean"], out["rel_change_sd"], out["n_seeds"], out["differs_share"]
+        )
+    ]
     return out

@@ -107,6 +107,84 @@ def _load_models(project_dir: Path) -> dict[str, tuple[str, list[str]]]:
 
 
 # --------------------------------------------------------------------------- #
+# Derived-metric expressions as a tree
+# --------------------------------------------------------------------------- #
+_TOKEN = re.compile(r"\s*(?:(\d+\.?\d*)|([A-Za-z_]\w*)|(.))")
+
+
+def _parse_formula(expr: str, inputs: dict[str, str]) -> dict:
+    """Parse ``a + b - c``, ``x / nullif(y, 0)`` and the like into a tree.
+
+    ``inputs`` maps the aliases the expression uses to metric names. Anything
+    beyond numbers, aliases, ``+ - * /``, parentheses and ``nullif(x, 0)``
+    raises ``ValueError``.
+    """
+    tokens = [m.groups() for m in _TOKEN.finditer(expr) if any(m.groups())]
+    pos = 0
+
+    def peek() -> str | None:
+        return tokens[pos][2] if pos < len(tokens) else None
+
+    def take(symbol: str) -> None:
+        nonlocal pos
+        if peek() != symbol:
+            raise ValueError(f"expected {symbol!r} in {expr!r}")
+        pos += 1
+
+    def atom() -> dict:
+        nonlocal pos
+        if pos >= len(tokens):
+            raise ValueError(f"unexpected end of {expr!r}")
+        number, ident, symbol = tokens[pos]
+        pos += 1
+        if number is not None:
+            return {"const": float(number)}
+        if ident is not None:
+            if ident.lower() == "nullif":
+                take("(")
+                inner = add()
+                take(",")
+                zero = atom()
+                take(")")
+                if zero != {"const": 0.0}:
+                    raise ValueError("only nullif(x, 0) is supported")
+                return {"op": "nullif_zero", "args": [inner]}
+            if ident not in inputs:
+                raise ValueError(f"unknown name {ident!r} in {expr!r}")
+            return {"metric": inputs[ident]}
+        if symbol == "(":
+            inner = add()
+            take(")")
+            return inner
+        if symbol == "-":
+            return {"op": "neg", "args": [atom()]}
+        raise ValueError(f"unexpected {symbol!r} in {expr!r}")
+
+    def mul() -> dict:
+        nonlocal pos
+        node = atom()
+        while peek() in ("*", "/"):
+            op = peek()
+            pos += 1
+            node = {"op": op, "args": [node, atom()]}
+        return node
+
+    def add() -> dict:
+        nonlocal pos
+        node = mul()
+        while peek() in ("+", "-"):
+            op = peek()
+            pos += 1
+            node = {"op": op, "args": [node, mul()]}
+        return node
+
+    tree = add()
+    if pos != len(tokens):
+        raise ValueError(f"trailing input in {expr!r}")
+    return tree
+
+
+# --------------------------------------------------------------------------- #
 # Semantic manifest
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -300,6 +378,37 @@ class SemanticLayer:
         entity = next(iter(entities)) if len(entities) == 1 else None
         return {d: (f"{entity}__{d}" if entity else None) for d in sorted(common)}
 
+    def has_sides(self, name: str) -> bool:
+        """Whether the series carry ``numerator`` / ``denominator`` for a metric:
+        ratio metrics (their two input metrics) and simple averages (the sum
+        and the row count)."""
+        metric = self.metrics[name]
+        if metric.kind == "ratio":
+            return True
+        return metric.kind == "simple" and metric.measure.agg == "average"  # type: ignore[union-attr]
+
+    def measure_agg(self, name: str) -> str | None:
+        """The measure aggregation behind a simple or cumulative metric."""
+        measure = self.metrics[name].measure
+        return None if measure is None else measure.agg
+
+    def formula(self, name: str) -> dict | None:
+        """A derived metric's ``expr`` as a tree, so a consumer need not parse SQL.
+
+        Nodes: ``{"metric": name}``, ``{"const": number}``, and
+        ``{"op": "+" | "-" | "*" | "/" | "neg" | "nullif_zero", "args": [...]}``
+        (``nullif_zero(x)`` is NULL where ``x`` is 0: the guard on a divisor).
+        ``None`` for other metric types, or when the expression uses anything
+        else — then ``expr`` is all there is.
+        """
+        metric = self.metrics[name]
+        if metric.kind != "derived" or metric.expr is None:
+            return None
+        try:
+            return _parse_formula(metric.expr, metric.inputs)
+        except ValueError:
+            return None
+
     def single_dimension_sets(self) -> list[tuple[str, ...]]:
         """Every dimension some metric can be sliced by, one at a time."""
         dims = sorted({d for name in self.metrics for d in self.dimensions(name)})
@@ -314,8 +423,12 @@ class SemanticLayer:
           ``count_distinct`` over a one-row-per-entity-per-day model — so the
           vertical names its stocks (``stocks``);
         - ``ratio_of_sums``: sum ``numerator`` and ``denominator``, then divide;
-        - ``average``: a mean over rows; daily means cannot be combined
-          exactly without the row counts (average them as an approximation);
+        - ``ratio_of_aggregates``: a ratio with a side that is not a sum
+          (``customer_churn_rate`` divides churned subscriptions, a flow, by
+          active subscriptions, a stock). Aggregate each side by its own
+          input metric's rule, then divide; summing both is wrong;
+        - ``average``: a mean over rows. The series give its sum and row
+          count as ``numerator`` / ``denominator``: sum both, then divide;
         - ``count_distinct``: distinct entities per day; the period's distinct
           count is not derivable from the days;
         - ``rolling_window``: already a trailing window; take the last day;
@@ -325,7 +438,8 @@ class SemanticLayer:
         if name in stocks:
             return "end_of_period"
         if metric.kind == "ratio":
-            return "ratio_of_sums"
+            sides = {self.time_aggregation(m, stocks) for m in metric.inputs.values()}
+            return "ratio_of_sums" if sides == {"sum"} else "ratio_of_aggregates"
         if metric.kind == "derived":
             return "derived"
         if metric.kind == "cumulative":
@@ -424,7 +538,7 @@ class SemanticLayer:
                 sql = self._metric_sql(name, dims)
                 label = ",".join(dims) if dims else None
                 value = " || ',' || ".join(f"g{i}" for i in range(len(dims))) if dims else "NULL"
-                num, den = ("num", "den") if self.metrics[name].kind == "ratio" else ("NULL",) * 2
+                num, den = ("num", "den") if self.has_sides(name) else ("NULL",) * 2
                 df = con.execute(
                     f"SELECT d AS date, CAST({value} AS VARCHAR) AS value, CAST(v AS DOUBLE) AS v, "
                     f"CAST({num} AS DOUBLE) AS numerator, CAST({den} AS DOUBLE) AS denominator "
@@ -455,9 +569,12 @@ class SemanticLayer:
                 for i, d in enumerate(dims)
             )
             agg = _AGGS[m.agg].format(e=m.expr)
+            # An average hands out its sum and its row count, so a consumer
+            # can re-aggregate it exactly (weekly mean = sum of sums / sum of counts).
+            sides = f", sum({m.expr}) AS num, count({m.expr}) AS den" if m.agg == "average" else ""
             if metric.kind == "simple":
                 sparse = (
-                    f"SELECT CAST({m.time_expr} AS DATE) AS d{gsel}, {agg} AS v "
+                    f"SELECT CAST({m.time_expr} AS DATE) AS d{gsel}, {agg} AS v{sides} "
                     f"FROM dbt.{m.relation} GROUP BY ALL"
                 )
             else:  # cumulative: each day aggregates the trailing window of rows
@@ -471,9 +588,12 @@ class SemanticLayer:
             if dims:
                 grid = f"_spine CROSS JOIN (SELECT DISTINCT {gcols[2:]} FROM x)"
             v = "x.v" if metric.fill is None else f"coalesce(x.v, {metric.fill!r})"
+            out_sides = ""
+            if sides and metric.kind == "simple":
+                out_sides = ", coalesce(x.num, 0) AS num, coalesce(x.den, 0) AS den"
             return (
                 f"WITH x AS (SELECT *, TRUE AS p FROM ({sparse})) "
-                f"SELECT {using}, {v} AS v, coalesce(x.p, FALSE) AS p "
+                f"SELECT {using}, {v} AS v, coalesce(x.p, FALSE) AS p{out_sides} "
                 f"FROM {grid} LEFT JOIN x USING ({using})"
             )
         # ratio / derived: full outer join of the (dense) inputs on (day, dims),

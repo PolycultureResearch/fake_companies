@@ -19,6 +19,7 @@ Layout under the output directory::
     <regime>/s<seed>/null.series.parquet            (every world has one)
     <regime>/s<seed>/only.<anomaly>.duckdb          (+ the same two sidecars)
     <regime>/s<seed>/only.<anomaly>.effects.parquet
+    <regime>/s<seed>/only.<anomaly>.effects_summary.parquet
     <regime>/s<seed>/story.duckdb                   (+ the same two sidecars)
     effects_summary.parquet
 
@@ -79,6 +80,11 @@ class WorldEntry(BaseModel):
     config_hash: str  # hash of the effective config (overrides + selection applied)
     # Single worlds: date, metric, dimension, value, null_value, world_value, diff.
     effects: str | None = None
+    # Single worlds: one row per (metric, dimension, value) of the effects
+    # table with the measured stats (rel_change, noise_floor, first_diff,
+    # onset, z_window, moved, ...). The ground truth's ``measured_effects``
+    # is this table's totals; a node bound to a slice looks itself up here.
+    effects_summary: str | None = None
     # Every world: date, metric, dimension, value, metric_value, numerator,
     # denominator — the daily series of every metric, total and by each
     # single dimension, as MetricFlow would return them.
@@ -94,13 +100,28 @@ class MetricInfo(BaseModel):
     type: str  # simple | ratio | derived | cumulative
     fill_nulls_with: float | None = None  # value of a day with no rows (None: NULL)
     # How daily values combine into a week or month: sum | end_of_period |
-    # ratio_of_sums | average | count_distinct | rolling_window | derived
-    # (see SemanticLayer.time_aggregation).
+    # ratio_of_sums | ratio_of_aggregates | average | count_distinct |
+    # rolling_window | derived (see SemanticLayer.time_aggregation).
     time_aggregation: str = "sum"
+    # The measure aggregation behind a simple or cumulative metric (sum,
+    # count_distinct, average, ...); None for ratio and derived metrics. A
+    # stock that is a count_distinct (active_subscriptions) is the distinct
+    # count on each day: its end-of-period value is the count on the last
+    # day, which is NOT MetricFlow's weekly number (distinct over the week).
+    measure_agg: str | None = None
     # ratio: {"numerator": metric, "denominator": metric}; derived: the
     # alias -> metric inputs of ``expr``. Empty otherwise.
     inputs: dict[str, str] = Field(default_factory=dict)
+    # For each key of ``inputs``, that input metric's own time_aggregation:
+    # aggregate each side by it before dividing or evaluating the formula.
+    input_time_aggregation: dict[str, str] = Field(default_factory=dict)
     expr: str | None = None  # derived: SQL over the input aliases
+    # derived: ``expr`` as a tree of {"metric"} / {"const"} / {"op", "args"}
+    # nodes (see SemanticLayer.formula); None if it could not be parsed.
+    formula: dict | None = None
+    # Whether the series carry numerator/denominator for this metric (ratio
+    # metrics: the two inputs; averages: the sum and the row count).
+    has_sides: bool = False
     # Dimension name as the effects tables spell it -> MetricFlow group-by id
     # (``channel`` -> ``session__channel``), or None when the metric spans
     # semantic models and no single MetricFlow group-by addresses it.
@@ -317,6 +338,20 @@ def _write_series(series, path: Path) -> None:
         con.close()
 
 
+def _write_twin_summary(summary, path: Path) -> None:
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        con.register("_summary", summary)
+        con.execute(
+            "COPY (SELECT * FROM _summary ORDER BY metric, dimension NULLS FIRST, "
+            f"value NULLS FIRST) TO '{path}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+    finally:
+        con.close()
+
+
 def _build_group(job: dict[str, Any]) -> dict[str, Any]:
     """Build every world of one (regime, seed). Top-level so it pickles.
 
@@ -363,7 +398,7 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
     null_series = None
     for plan in job["plans"]:
         result = generate(cfg, seed=seed, anomalies=plan.selection)
-        con = effects_rel = series_rel = None
+        con = effects_rel = series_rel = summary_rel = None
         try:
             twin = job["effects"] and plan.kind in ("null", "single")
             if twin or job["series"]:
@@ -382,13 +417,17 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
                 null_series = series
             elif twin:
                 record = result.ground_truth[0]
-                labels = {",".join(s) for s in sets_by_plan[plan.id]}
+                # Measured on the total, on every single dimension the series
+                # carry, and on the anomaly's own root slice.
+                labels = {",".join(s) for s in [*singles_dims, *sets_by_plan[plan.id]]}
 
                 def measured(frame, labels=labels):
                     return frame[frame["dimension"].isna() | frame["dimension"].isin(labels)]
 
                 effects = twin_effects(measured(null_series), measured(series), fills)
                 summary = summarize_twin(effects, record.start, record.end)
+                summary_rel = (rel_dir / f"{plan.stem}.effects_summary.parquet").as_posix()
+                _write_twin_summary(summary, out_dir / summary_rel)
                 fields = ground_truth_fields(
                     summary, record.affected_metrics, record.root_metric, record.root_slice
                 )
@@ -429,6 +468,7 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
                 run_manifest=(rel_dir / f"{plan.stem}.run_manifest.json").as_posix(),
                 config_hash=result.manifest["config_hash"],
                 effects=effects_rel,
+                effects_summary=summary_rel,
                 series=series_rel,
             ).model_dump(mode="json")
         )
@@ -571,16 +611,7 @@ def build_world_set(
                 type=layer.metrics[name].kind,
                 fill_nulls_with=layer.fill_value(name),
                 dimensions=layer.dimensions(name),
-                time_aggregation=layer.time_aggregation(name, stocks),
-                inputs=(
-                    {
-                        "numerator": layer.metrics[name].inputs["num"],
-                        "denominator": layer.metrics[name].inputs["den"],
-                    }
-                    if layer.metrics[name].kind == "ratio"
-                    else dict(layer.metrics[name].inputs)
-                ),
-                expr=layer.metrics[name].expr,
+                **_metric_inputs(layer, name, stocks),
             )
             for name in sorted(layer.metrics)
         ]
@@ -596,6 +627,25 @@ def build_world_set(
         for message in group["warnings"]:
             warnings.warn(message, RootNotConfirmedWarning, stacklevel=2)
     return manifest
+
+
+def _metric_inputs(layer, name: str, stocks: frozenset[str]) -> dict[str, Any]:
+    """The aggregation fields of one manifest ``MetricInfo``."""
+    metric = layer.metrics[name]
+    inputs = dict(metric.inputs)
+    if metric.kind == "ratio":
+        inputs = {"numerator": metric.inputs["num"], "denominator": metric.inputs["den"]}
+    return {
+        "time_aggregation": layer.time_aggregation(name, stocks),
+        "measure_agg": layer.measure_agg(name),
+        "inputs": inputs,
+        "input_time_aggregation": {
+            key: layer.time_aggregation(m, stocks) for key, m in inputs.items()
+        },
+        "expr": metric.expr,
+        "formula": layer.formula(name),
+        "has_sides": layer.has_sides(name),
+    }
 
 
 def _write_summary(summary, path: Path) -> None:
