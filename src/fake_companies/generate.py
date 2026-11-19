@@ -68,7 +68,12 @@ def generate(
 
     panel = vertical.build_drivers(cfg, cal, rng)
     panel, rate_gt = apply_rate_events(
-        panel, resolved, cal, known=vertical.known_drivers(cfg), affected=vertical.affected_metrics
+        panel,
+        resolved,
+        cal,
+        known=vertical.known_drivers(cfg),
+        affected=vertical.affected_metrics,
+        root=vertical.root_label,
     )
     ground_truth.extend(rate_gt)
 

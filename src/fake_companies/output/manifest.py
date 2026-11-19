@@ -93,7 +93,5 @@ def write_json_sidecars(
     manifest_path = out_dir / f"{prefix}run_manifest.json"
     truth_path = out_dir / f"{prefix}ground_truth.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
-    truth_path.write_text(
-        json.dumps([r.model_dump(mode="json") for r in records], indent=2, default=str)
-    )
+    truth_path.write_text(json.dumps([r.as_json() for r in records], indent=2, default=str))
     return manifest_path, truth_path

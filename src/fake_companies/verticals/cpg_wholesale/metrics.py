@@ -7,6 +7,8 @@ an RCA tool must not attribute a revenue move to an ad-spend change.
 
 from __future__ import annotations
 
+from ..base import RootLabel, RootRule, resolve_root
+
 _SALES_METRICS = [
     "pos_units",
     "pos_dollars",
@@ -22,6 +24,16 @@ _DRIVER_METRICS: list[tuple[str, list[str]]] = [
 ]
 
 
+# Driver -> root: the first metric a rate anomaly on the driver moves, the
+# dimension its own member is a value of, and the segment dims the entity
+# builder honors (consumer demand reads a per-banner segment).
+_ROOTS: list[RootRule] = [
+    ("spend.", "marketing_spend", "channel", {}),
+    ("consumer_demand.", "pos_units", "category", {"banner": "retailer_banner"}),
+    ("velocity.", "pos_units", "retailer_banner", {}),
+]
+
+
 def affected_metrics_for_driver(driver: str) -> list[str]:
     for prefix, metrics in _DRIVER_METRICS:
         if prefix.endswith(".") and driver.startswith(prefix):
@@ -29,3 +41,7 @@ def affected_metrics_for_driver(driver: str) -> list[str]:
         if not prefix.endswith(".") and driver == prefix:
             return metrics
     return ["wholesale_net_revenue"]
+
+
+def root_label_for_driver(driver: str, segment: dict[str, str] | None = None) -> RootLabel:
+    return resolve_root(_ROOTS, driver, segment)

@@ -114,3 +114,72 @@ def test_affected_metrics_exist_in_dbt(name, smoke_cfgs):
         assert affected, f"driver {driver!r} maps to no metrics"
         unknown = set(affected) - defined
         assert not unknown, f"driver {driver!r} names metrics not in {metrics_yml.name}: {unknown}"
+
+
+@pytest.mark.parametrize("name", VERTICALS)
+def test_every_driver_has_a_root_metric(name, smoke_cfgs):
+    """Every driver names a root metric the dbt project defines, and a slice
+    of it MetricFlow can address (eval-worlds spec 4.6)."""
+    from fake_companies.semantic import SemanticLayer
+
+    v = REGISTRY[name]
+    layer = SemanticLayer.for_vertical(v)
+    for driver in sorted(v.known_drivers(smoke_cfgs[name])):
+        label = v.root_label(driver)
+        assert label.metric in layer.metrics, f"driver {driver!r}: unknown root {label.metric!r}"
+        addressable = layer.dimensions(label.metric)
+        for dim in label.slice:
+            assert addressable.get(dim), (
+                f"driver {driver!r}: root {label.metric!r} has no MetricFlow dimension {dim!r}"
+            )
+        if "." in driver:
+            member = driver.split(".", 1)[1]
+            assert member in label.slice.values() or not label.slice, (driver, label)
+
+
+@pytest.mark.parametrize(
+    "config", sorted((REPO_ROOT / "configs").glob("*.yaml")), ids=lambda p: p.stem
+)
+def test_scripted_anomalies_have_addressable_roots(config):
+    """Every scripted rate anomaly in every shipped config gets a root label
+    whose whole slice (driver member + segment) the root metric can be cut by."""
+    from fake_companies.semantic import SemanticLayer
+
+    cfg = load_config(config)
+    v = REGISTRY[cfg.company.vertical]
+    layer = SemanticLayer.for_vertical(v)
+    for a in cfg.anomalies.scripted:
+        if a.kind != "rate":
+            continue
+        label = v.root_label(a.target, a.segment)
+        addressable = layer.dimensions(label.metric)
+        assert all(addressable.get(d) for d in label.slice), (a.name, label)
+        assert (label.dimension is None) == (label.value is None)
+
+
+def test_root_label_rules():
+    from fake_companies.verticals.base import RootLabel
+
+    retail = REGISTRY["retail_dtc"]
+    assert retail.root_label("spend.paid_social") == RootLabel(
+        "marketing_spend", {"channel": "paid_social"}
+    )
+    label = retail.root_label("conversion_rate.paid_search", {"device": "mobile"})
+    assert (label.metric, label.dimension, label.value) == (
+        "conversion_rate",
+        "channel,device",
+        "paid_search,mobile",
+    )
+    # A segment on a driver whose builder ignores segments adds nothing.
+    assert retail.root_label("spend.paid_social", {"device": "mobile"}).slice == {
+        "channel": "paid_social"
+    }
+    assert retail.root_label("items_per_order") == RootLabel("units", {})
+    assert retail.root_label("items_per_order").dimension is None
+    cpg = REGISTRY["cpg_wholesale"]
+    assert cpg.root_label("consumer_demand.teas", {"banner": "whole_earth"}).slice == {
+        "category": "teas",
+        "retailer_banner": "whole_earth",
+    }
+    with pytest.raises(KeyError):
+        retail.root_label("not_a_driver")
