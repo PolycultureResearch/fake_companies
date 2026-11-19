@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pandas as pd
 import pytest
 from typer.testing import CliRunner
@@ -117,6 +118,118 @@ def test_manifest_describes_the_metrics(retail_set):
     # Sliceable here, but not by one MetricFlow group-by (two semantic models).
     assert by_name["return_rate"].dimensions == {"category": None}
     assert manifest.noise.k == NOISE_K
+    # How each metric aggregates over time, for a consumer resampling to weeks.
+    assert by_name["orders"].time_aggregation == "sum"
+    assert by_name["conversion_rate"].time_aggregation == "ratio_of_sums"
+    assert by_name["conversion_rate"].inputs == {
+        "numerator": "converting_sessions",
+        "denominator": "sessions",
+    }
+    assert by_name["net_revenue"].time_aggregation == "derived"
+    assert by_name["net_revenue"].expr == "gross_revenue - discounts - refunds"
+    assert set(by_name["net_revenue"].inputs.values()) == {"gross_revenue", "discounts", "refunds"}
+    assert by_name["avg_fulfillment_days"].time_aggregation == "average"
+
+
+def test_stocks_and_windows_are_marked_in_the_manifest(tmp_path):
+    manifest = build_world_set(
+        REPO_ROOT / "configs" / "smoke_90d.yaml", tmp_path, seeds=[0], null=True, raw=False
+    )
+    agg = {m.name: m.time_aggregation for m in manifest.metrics}
+    assert agg["mrr"] == agg["active_subscriptions"] == "end_of_period"
+    assert agg["new_mrr"] == "sum" and agg["dau"] == "count_distinct"
+    assert agg["wau"] == "rolling_window" and agg["arpu"] == "derived"
+    world = manifest.worlds[0]
+    assert world.path is None and world.series == "baseline/s0/null.series.parquet"
+    files = sorted(p.name for p in (tmp_path / "baseline" / "s0").iterdir())
+    assert files == ["null.ground_truth.json", "null.run_manifest.json", "null.series.parquet"]
+
+
+def test_every_world_has_a_series_file(retail_set):
+    out, manifest = retail_set
+    by_name = {m.name: m for m in manifest.metrics}
+    days = 90
+    for world in manifest.worlds:
+        series = pd.read_parquet(out / world.series)
+        assert list(series.columns) == [
+            "date",
+            "metric",
+            "dimension",
+            "value",
+            "metric_value",
+            "numerator",
+            "denominator",
+        ]
+        totals = series[series["dimension"].isna()]
+        assert set(totals["metric"]) == set(by_name), "a total for every metric"
+        assert (totals.groupby("metric").size() == days).all(), "every day of the timeline"
+        assert totals["value"].isna().all()
+        # every single-dimension slice the manifest lists, and nothing else
+        listed = {(m.name, d) for m in manifest.metrics for d in m.dimensions}
+        sliced = series[series["dimension"].notna()]
+        assert set(zip(sliced["metric"], sliced["dimension"])) == listed
+        assert not sliced["dimension"].str.contains(",").any()
+        ratios = series["metric"].map(lambda m: by_name[m].type == "ratio")
+        assert series.loc[ratios, ["numerator", "denominator"]].notna().all().all()
+        assert series.loc[~ratios, ["numerator", "denominator"]].isna().all().all()
+
+
+def test_series_are_the_values_behind_the_effects(retail_set):
+    """For a twin, the two series files hold exactly the effects table's
+    ``null_value`` and ``world_value``."""
+    out, manifest = retail_set
+    keys = ["date", "metric", "dimension", "value"]
+    for world, null in manifest.twins():
+        effects = _keyed(pd.read_parquet(out / world.effects))
+        effects = effects[~effects["dimension"].str.contains(",")]
+        for column, entry in (("null_value", null), ("world_value", world)):
+            series = _keyed(pd.read_parquet(out / entry.series))[[*keys, "metric_value"]]
+            joined = effects.merge(series, on=keys, how="left", indicator=True)
+            assert (joined["_merge"] == "both").all()
+            a, b = (
+                joined[column].to_numpy(dtype=float),
+                joined["metric_value"].to_numpy(dtype=float),
+            )
+            assert ((a == b) | (np.isnan(a) & np.isnan(b))).all(), (world.id, column)
+
+
+def _keyed(frame: pd.DataFrame) -> pd.DataFrame:
+    """Null slice keys as "" so totals join (an all-null column reads as float)."""
+    frame = frame.copy()
+    for column in ("dimension", "value"):
+        frame[column] = frame[column].astype(object).where(frame[column].notna(), "")
+    return frame
+
+
+def test_weekly_ratio_from_the_series_sides(retail_set):
+    """The point of numerator/denominator: a weekly conversion rate is the
+    ratio of weekly sums, which the daily ratios alone cannot give."""
+    out, manifest = retail_set
+    series = pd.read_parquet(out / manifest.worlds[0].series)
+    rate = series[(series["metric"] == "conversion_rate") & series["dimension"].isna()]
+    parts = series[series["dimension"].isna()].pivot(
+        index="date", columns="metric", values="metric_value"
+    )
+    week = pd.to_datetime(rate["date"]).dt.to_period("W").to_numpy()
+    from_sides = rate.groupby(week)["numerator"].sum() / rate.groupby(week)["denominator"].sum()
+    truth = parts["converting_sessions"].groupby(week).sum() / parts["sessions"].groupby(week).sum()
+    assert np.allclose(from_sides.to_numpy(), truth.to_numpy())
+    assert not np.allclose(
+        from_sides.to_numpy(), rate.groupby(week)["metric_value"].mean().to_numpy()
+    )
+
+
+def test_no_raw_and_no_series(tmp_path):
+    a = build_world_set(RETAIL, tmp_path / "a", seeds=[0], singles="all", raw=False, jobs=1)
+    assert all(w.path is None and w.series for w in a.worlds)
+    assert not list((tmp_path / "a").rglob("*.duckdb"))
+    assert all((tmp_path / "a" / w.effects).is_file() for w in a.worlds if w.kind == "single")
+    b = build_world_set(RETAIL, tmp_path / "b", seeds=[0], null=True, series=False, effects=False)
+    assert b.worlds[0].series is None and b.worlds[0].path == "baseline/s0/null.duckdb"
+    with pytest.raises(ValueError, match="no data"):
+        build_world_set(
+            RETAIL, tmp_path / "c", seeds=[0], null=True, raw=False, series=False, effects=False
+        )
 
 
 def test_parquet_world_holds_the_raw_tables(retail_set):
@@ -210,6 +323,7 @@ def test_regimes_and_overrides_are_recorded(tmp_path):
         null=True,
         overrides={"noise.ar1": 0.1},
         effects=False,
+        series=False,
     )
     base, flat = manifest.worlds
     assert (base.regime, flat.regime) == ("baseline", "flat")

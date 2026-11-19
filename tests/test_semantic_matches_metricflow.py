@@ -4,8 +4,10 @@ Measured effects are computed by ``fake_companies.semantic`` instead of
 ``dbt build`` + ``mf query`` per world. That is only honest if the two agree,
 so for each vertical's smoke config this builds the dbt project, asks
 MetricFlow for **every metric the semantic module computes** at day grain,
-and requires the same numbers. It also checks one sliced query per vertical:
-the root metric of the smoke anomaly, grouped by its root dimensions.
+and requires the same numbers. It also checks every single-dimension slice
+that goes into a world's ``series.parquet`` (one MetricFlow query per
+dimension id), the two sides of every ratio metric, and one two-dimension
+query: the root metric of the smoke anomaly, grouped by its root dimensions.
 
 Requires the dbt extra (skipped otherwise).
 """
@@ -93,7 +95,10 @@ def test_series_match_metricflow(config_name, tmp_path):
     rate = next(a for a in cfg.anomalies.scripted if a.kind == "rate")
     root = vertical.root_label(rate.target, rate.segment)
     dims = tuple(root.slice)
-    mine = layer.series(result.frames, result.tables, result.calendar, dimension_sets=[dims])
+    singles = layer.single_dimension_sets()
+    mine = layer.series(
+        result.frames, result.tables, result.calendar, dimension_sets=[*singles, dims]
+    )
     lo, hi = pd.Timestamp(cfg.timeline.start), pd.Timestamp(cfg.timeline.end_date)
 
     # --- totals: every metric, every day ----------------------------------- #
@@ -130,3 +135,56 @@ def test_series_match_metricflow(config_name, tmp_path):
         atol=1e-9,
         equal_nan=True,
     ), f"{config_name}: {root.metric} by {dims} differs from MetricFlow"
+
+    # --- ratio sides: numerator / denominator are the input metrics -------- #
+    for name in names:
+        metric = layer.metrics[name]
+        rows = mine[(mine["metric"] == name) & mine["dimension"].isna()].set_index("date")
+        if metric.kind != "ratio":
+            assert rows["numerator"].isna().all() and rows["denominator"].isna().all(), name
+            continue
+        for side, column in (("num", "numerator"), ("den", "denominator")):
+            theirs = mf[metric.inputs[side]].reindex(rows.index).fillna(0.0).to_numpy(dtype=float)
+            assert np.allclose(rows[column].to_numpy(dtype=float), theirs, rtol=1e-9), (name, side)
+        defined = rows["denominator"] != 0
+        assert np.allclose(
+            rows.loc[defined, "v"],
+            rows.loc[defined, "numerator"] / rows.loc[defined, "denominator"],
+            rtol=1e-9,
+            equal_nan=True,
+        ), name
+
+    # --- every single-dimension slice MetricFlow can address --------------- #
+    by_id: dict[tuple[str, str], list[str]] = {}
+    for name in names:
+        for dim, mf_id in layer.dimensions(name).items():
+            if mf_id:
+                by_id.setdefault((dim, mf_id), []).append(name)
+    assert by_id, "no sliceable metric?"
+    checked = 0
+    for i, ((dim, mf_id), group) in enumerate(sorted(by_id.items())):
+        theirs = _mf(dbt_dir, env, group, [mf_id], tmp_path / f"dim{i}.csv")
+        theirs = theirs[(theirs["date"] >= lo) & (theirs["date"] <= hi)]
+        theirs["value"] = theirs[mf_id].map(_spell)
+        for name in group:
+            ours = mine[(mine["metric"] == name) & (mine["dimension"] == dim)]
+            joined = theirs[["date", "value", name]].merge(ours, on=["date", "value"], how="left")
+            # MetricFlow has a row per (day, value) that any metric of the
+            # query has; ours is dense. Where MetricFlow shows NULL for this
+            # metric, ours is the fill or NULL.
+            a = joined["v"].to_numpy(dtype=float)
+            b = joined[name].to_numpy(dtype=float)
+            ok = np.isclose(a, b, rtol=1e-9, atol=1e-9, equal_nan=True)
+            ok |= np.isnan(b) & (np.isnan(a) | (a == 0.0))
+            assert ok.all(), f"{config_name}: {name} by {dim} differs on {int((~ok).sum())} rows"
+            checked += 1
+    assert checked >= len(by_id)
+
+
+def _spell(value) -> str:
+    """A MetricFlow CSV dimension value as the series spell it."""
+    if pd.isna(value):
+        return "(null)"
+    if isinstance(value, (bool, np.bool_)):
+        return str(bool(value)).lower()
+    return str(value)

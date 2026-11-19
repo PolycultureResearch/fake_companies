@@ -57,6 +57,7 @@ _AGGS = {
     "sum_boolean": "sum(case when {e} then 1 else 0 end)",
 }
 NULL_VALUE = "(null)"  # how a NULL dimension value is spelled in a series
+SERIES_COLUMNS = ["date", "metric", "dimension", "value", "v", "numerator", "denominator"]
 
 
 class UnsupportedSemantics(ValueError):
@@ -299,6 +300,45 @@ class SemanticLayer:
         entity = next(iter(entities)) if len(entities) == 1 else None
         return {d: (f"{entity}__{d}" if entity else None) for d in sorted(common)}
 
+    def single_dimension_sets(self) -> list[tuple[str, ...]]:
+        """Every dimension some metric can be sliced by, one at a time."""
+        dims = sorted({d for name in self.metrics for d in self.dimensions(name)})
+        return [(d,) for d in dims]
+
+    def time_aggregation(self, name: str, stocks: frozenset[str] = frozenset()) -> str:
+        """How a metric's daily values combine into a week or a month.
+
+        - ``sum``: add the days up;
+        - ``end_of_period``: a stock (a level, not a flow): take the last day.
+          The semantic YAML cannot say this — a stock is a ``sum`` or a
+          ``count_distinct`` over a one-row-per-entity-per-day model — so the
+          vertical names its stocks (``stocks``);
+        - ``ratio_of_sums``: sum ``numerator`` and ``denominator``, then divide;
+        - ``average``: a mean over rows; daily means cannot be combined
+          exactly without the row counts (average them as an approximation);
+        - ``count_distinct``: distinct entities per day; the period's distinct
+          count is not derivable from the days;
+        - ``rolling_window``: already a trailing window; take the last day;
+        - ``derived``: recompute from its inputs after aggregating each.
+        """
+        metric = self.metrics[name]
+        if name in stocks:
+            return "end_of_period"
+        if metric.kind == "ratio":
+            return "ratio_of_sums"
+        if metric.kind == "derived":
+            return "derived"
+        if metric.kind == "cumulative":
+            return "rolling_window"
+        agg = metric.measure.agg  # type: ignore[union-attr]
+        if agg in ("sum", "sum_boolean", "count"):
+            return "sum"
+        if agg == "average":
+            return "average"
+        if agg == "count_distinct":
+            return "count_distinct"
+        return agg  # min | max
+
     def fill_value(self, name: str) -> float | None:
         """What a day with no rows is worth: the metric's ``fill_nulls_with``.
 
@@ -345,7 +385,9 @@ class SemanticLayer:
     ) -> pd.DataFrame:
         """Daily series for every supported metric, long format.
 
-        Columns: ``date``, ``metric``, ``dimension``, ``value``, ``v``.
+        Columns: ``date``, ``metric``, ``dimension``, ``value``, ``v``, and
+        ``numerator`` / ``denominator`` (the two sides of a ratio metric, each
+        with its own fill; NULL for every other metric type).
         ``dimension``/``value`` are NULL for the total; for a slice they are
         the dimension name and value (comma-joined for a multi-dimension set,
         e.g. ``channel,device`` / ``paid_search,mobile``). Days are the
@@ -375,15 +417,17 @@ class SemanticLayer:
             "AS DATE) AS d"
         )
         out: list[pd.DataFrame] = []
-        for dims in [(), *(dimension_sets or [])]:
+        for dims in dict.fromkeys([(), *(tuple(d) for d in dimension_sets or [])]):
             for name in names:
                 if any(d not in self.dimensions(name) for d in dims):
                     continue
                 sql = self._metric_sql(name, dims)
                 label = ",".join(dims) if dims else None
                 value = " || ',' || ".join(f"g{i}" for i in range(len(dims))) if dims else "NULL"
+                num, den = ("num", "den") if self.metrics[name].kind == "ratio" else ("NULL",) * 2
                 df = con.execute(
-                    f"SELECT d AS date, CAST({value} AS VARCHAR) AS value, CAST(v AS DOUBLE) AS v "
+                    f"SELECT d AS date, CAST({value} AS VARCHAR) AS value, CAST(v AS DOUBLE) AS v, "
+                    f"CAST({num} AS DOUBLE) AS numerator, CAST({den} AS DOUBLE) AS denominator "
                     f"FROM ({sql}) WHERE d BETWEEN DATE '{cal.start.isoformat()}' "
                     f"AND DATE '{cal.end.isoformat()}' ORDER BY 1, 2"
                 ).df()
@@ -391,7 +435,7 @@ class SemanticLayer:
                 df.insert(2, "dimension", label)
                 out.append(df)
         if not out:
-            return pd.DataFrame(columns=["date", "metric", "dimension", "value", "v"])
+            return pd.DataFrame(columns=SERIES_COLUMNS)
         res = pd.concat(out, ignore_index=True)
         res["date"] = pd.to_datetime(res["date"])
         return res
@@ -454,4 +498,7 @@ class SemanticLayer:
         else:
             expr = metric.expr
         inner = f"SELECT {using}, {', '.join(cols)}, {' OR '.join(present)} AS p FROM {joined}"
-        return f"SELECT {using}, CASE WHEN p THEN {expr} END AS v, p FROM ({inner})"
+        # A ratio also hands out its two sides, so a consumer can re-aggregate
+        # it to a coarser grain as a ratio of sums.
+        sides = ", num, den" if metric.kind == "ratio" else ""
+        return f"SELECT {using}, CASE WHEN p THEN {expr} END AS v, p{sides} FROM ({inner})"

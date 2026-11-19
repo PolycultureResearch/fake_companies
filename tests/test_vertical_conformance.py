@@ -183,3 +183,14 @@ def test_root_label_rules():
     }
     with pytest.raises(KeyError):
         retail.root_label("not_a_driver")
+
+
+@pytest.mark.parametrize("name", VERTICALS)
+def test_stock_metrics_exist(name):
+    from fake_companies.semantic import SemanticLayer
+
+    v = REGISTRY[name]
+    layer = SemanticLayer.for_vertical(v)
+    assert v.stock_metrics() <= set(layer.metrics)
+    for metric in v.stock_metrics():
+        assert layer.time_aggregation(metric, v.stock_metrics()) == "end_of_period"

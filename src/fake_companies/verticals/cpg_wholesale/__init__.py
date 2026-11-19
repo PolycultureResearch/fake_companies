@@ -82,5 +82,10 @@ class CPGWholesaleVertical:
 
         return root_label_for_driver(driver, segment)
 
+    def stock_metrics(self) -> frozenset[str]:
+        from .metrics import STOCK_METRICS
+
+        return STOCK_METRICS
+
     def dbt_project(self) -> str:
         return "cpg_wholesale"

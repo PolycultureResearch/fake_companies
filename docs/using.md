@@ -206,6 +206,9 @@ names; singles always bring their null twin), and with `--story` the config as
 written. `--format duckdb` (default) writes one database per world; `parquet`
 writes the raw tables as `<schema>.<table>.parquet`, which is smaller. `--jobs`
 only changes the wall time. `--set` applies an override to every world.
+`--no-raw` skips the raw tables altogether (they are most of a world's size)
+for a consumer that reads only the metric series and effects; `--no-series`
+and `--no-effects` skip those.
 
 ```
 out/worlds/alpenglow/
@@ -214,9 +217,11 @@ out/worlds/alpenglow/
   baseline/s0/null/                             # or null.duckdb
   baseline/s0/null.ground_truth.json            # []
   baseline/s0/null.run_manifest.json
+  baseline/s0/null.series.parquet               # every world has one
   baseline/s0/only.paid_social_budget_cut/
   baseline/s0/only.paid_social_budget_cut.ground_truth.json
   baseline/s0/only.paid_social_budget_cut.run_manifest.json
+  baseline/s0/only.paid_social_budget_cut.series.parquet
   baseline/s0/only.paid_social_budget_cut.effects.parquet
 ```
 
@@ -261,6 +266,20 @@ bytes, whichever other worlds are in the set.
 `metric`, `dimension`, `value`, `null_value`, `world_value`, `diff`, for every
 metric of the vertical (`dimension` and `value` are null for the total; the
 slices are the anomaly's root slice and each of its dimensions).
+
+**`*.series.parquet`** (every world: null, single, story) is the daily series
+of every metric, as MetricFlow would return it, so a consumer needs neither dbt
+nor the raw tables: `date`, `metric`, `dimension`, `value`, `metric_value`,
+`numerator`, `denominator`. It holds the total (`dimension` and `value` null)
+and one slice per dimension listed for the metric in `worlds.json` →
+`metrics[].dimensions`. Every timeline day is present; `metric_value` is null
+where the metric is undefined (a ratio over zero). `numerator` / `denominator`
+are filled for ratio metrics only: to get a weekly or monthly ratio, sum both
+and divide — do not average the daily ratios. `metrics[].time_aggregation` says
+how each metric combines over time: `sum`, `end_of_period` (a stock: MRR, open
+pipeline), `ratio_of_sums`, `derived` (recompute `expr` from `inputs` after
+aggregating each), `average`, `count_distinct` (DAU: not derivable for a longer
+period from its days) or `rolling_window` (WAU).
 
 **Read the measured numbers as effect plus noise.** A single world and its null
 twin share a seed, but most entity builders draw for the whole timeline from one

@@ -90,6 +90,15 @@ def worlds(
         "--effects/--no-effects",
         help="Measure each single world against its null twin (needs the repo's dbt/ projects).",
     ),
+    series: bool = typer.Option(
+        True,
+        "--series/--no-series",
+        help="Write <world>.series.parquet: every metric's daily series, total and by "
+        "each dimension (needs the repo's dbt/ projects).",
+    ),
+    no_raw: bool = typer.Option(
+        False, "--no-raw", help="Skip the raw tables (series, effects and ground truth only)."
+    ),
 ) -> None:
     """Build a world set: seeds x regimes x (null, singles, story) plus worlds.json."""
     import warnings
@@ -112,6 +121,8 @@ def worlds(
                 jobs=jobs,
                 overrides=parse_overrides(set_),
                 effects=effects,
+                series=series,
+                raw=not no_raw,
             )
     except (ValueError, FileNotFoundError) as e:
         raise typer.BadParameter(str(e)) from None

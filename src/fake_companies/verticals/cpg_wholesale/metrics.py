@@ -34,6 +34,11 @@ _ROOTS: list[RootRule] = [
 ]
 
 
+# Metrics that are levels, not flows: over a week or a month take the last
+# day, do not add the days up. (The semantic YAML cannot express this.)
+STOCK_METRICS: frozenset[str] = frozenset()
+
+
 def affected_metrics_for_driver(driver: str) -> list[str]:
     for prefix, metrics in _DRIVER_METRICS:
         if prefix.endswith(".") and driver.startswith(prefix):

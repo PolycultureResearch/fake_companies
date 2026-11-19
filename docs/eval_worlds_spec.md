@@ -407,6 +407,18 @@ spend has a growth curve there, and marketing is decoupled from sales, so
 `flat`, `declining` and `accelerating` change `marketing_spend` and nothing
 else. A growth curve on consumer demand is a change to the vertical.
 
+**Per-world metric series (added after phase 1, for Breakdown's runner).**
+Every world gets `<world>.series.parquet`: `date`, `metric`, `dimension`,
+`value`, `metric_value`, `numerator`, `denominator`, for the total of every
+metric and every single-dimension slice listed in `metrics[].dimensions`.
+Nothing was cut: on Alpenglow the file is a few MB per world. `numerator` and
+`denominator` are filled for ratio metrics so a ratio can be re-aggregated as
+a ratio of sums. `metrics[]` gained `time_aggregation`, `inputs` and `expr`.
+The semantic YAML cannot say that a metric is a stock (MRR is a `sum` over a
+subscription-day model), so each vertical names its stocks
+(`STOCK_METRICS` in `metrics.py`). `--no-raw` skips the raw tables; a world's
+`path` is then null.
+
 **Declared `affected_metrics` were left as they are.** The measured effects
 show where the hand-kept map is wrong (retail `category_demand.*` lists
 `units`, whose total cannot move; B2B `cycle_time_scale` omits the bookings,

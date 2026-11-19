@@ -115,6 +115,7 @@ def twin_effects(
     from ``fills``, or left NULL when it has none.
     """
     keys = ["date", *_KEYS]
+    null, world = null[[*keys, "v"]], world[[*keys, "v"]]
     merged = null.rename(columns={"v": "null_value"}).merge(
         world.rename(columns={"v": "world_value"}), on=keys, how="outer", indicator=True
     )

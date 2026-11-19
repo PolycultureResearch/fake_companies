@@ -30,7 +30,10 @@ columns).
 demoing it: per regime and seed, the *null* world (no anomalies), one *single* world
 per scripted anomaly, optionally the config as written, plus `worlds.json` (the
 manifest, a pydantic model in `worlds.py` — the only contract consumers read). Each
-single world carries **measured effects**: its day-by-day difference from its null
+world also gets `<world>.series.parquet`, every metric's daily series (total and by
+each dimension, with ratio numerators/denominators), so a consumer needs neither dbt
+nor the raw tables (`--no-raw` drops those). Each single world carries **measured
+effects**: its day-by-day difference from its null
 twin for every metric (`effects.py`), summarized into its ground truth and, across
 seeds, into `effects_summary.parquet`. The metric series come from `semantic.py`,
 which runs the vertical's dbt models and semantic YAML in-process (no dbt needed;

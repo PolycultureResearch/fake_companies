@@ -16,6 +16,7 @@ Layout under the output directory::
     <regime>/s<seed>/null.duckdb                    (or null/ with --format parquet)
     <regime>/s<seed>/null.ground_truth.json
     <regime>/s<seed>/null.run_manifest.json
+    <regime>/s<seed>/null.series.parquet            (every world has one)
     <regime>/s<seed>/only.<anomaly>.duckdb          (+ the same two sidecars)
     <regime>/s<seed>/only.<anomaly>.effects.parquet
     <regime>/s<seed>/story.duckdb                   (+ the same two sidecars)
@@ -70,12 +71,18 @@ class WorldEntry(BaseModel):
     kind: WorldKind
     anomalies: list[str] = Field(default_factory=list)  # ground-truth ids in this world
     twin_of: str | None = None  # a single world's null twin
-    path: str  # a .duckdb file, or a directory of <schema>.<table>.parquet
+    # A .duckdb file, or a directory of <schema>.<table>.parquet; None for a
+    # set built with --no-raw (series and effects only).
+    path: str | None = None
     ground_truth: str
     run_manifest: str
     config_hash: str  # hash of the effective config (overrides + selection applied)
     # Single worlds: date, metric, dimension, value, null_value, world_value, diff.
     effects: str | None = None
+    # Every world: date, metric, dimension, value, metric_value, numerator,
+    # denominator — the daily series of every metric, total and by each
+    # single dimension, as MetricFlow would return them.
+    series: str | None = None
 
 
 class MetricInfo(BaseModel):
@@ -86,6 +93,14 @@ class MetricInfo(BaseModel):
     name: str
     type: str  # simple | ratio | derived | cumulative
     fill_nulls_with: float | None = None  # value of a day with no rows (None: NULL)
+    # How daily values combine into a week or month: sum | end_of_period |
+    # ratio_of_sums | average | count_distinct | rolling_window | derived
+    # (see SemanticLayer.time_aggregation).
+    time_aggregation: str = "sum"
+    # ratio: {"numerator": metric, "denominator": metric}; derived: the
+    # alias -> metric inputs of ``expr``. Empty otherwise.
+    inputs: dict[str, str] = Field(default_factory=dict)
+    expr: str | None = None  # derived: SQL over the input aliases
     # Dimension name as the effects tables spell it -> MetricFlow group-by id
     # (``channel`` -> ``session__channel``), or None when the metric spans
     # semantic models and no single MetricFlow group-by addresses it.
@@ -249,12 +264,16 @@ def _dimension_sets(root_slice: dict[str, str]) -> list[tuple[str, ...]]:
     return sets
 
 
-def _write_world(result, group_dir: Path, stem: str, fmt: str, con=None) -> str:
-    """Persist one world's tables; return its path relative to ``group_dir``."""
+def _write_world(result, group_dir: Path, stem: str, fmt: str, con=None, raw=True) -> str | None:
+    """Persist one world's tables; return its path relative to ``group_dir``
+    (None with ``raw=False``: sidecars only)."""
     from .generate import write_generation
     from .output import write_json_sidecars
     from .output.export import write_raw_parquet
 
+    if not raw:
+        write_json_sidecars(group_dir, result.manifest, result.ground_truth, stem=stem)
+        return None
     if fmt == "duckdb":
         rel = f"{stem}.duckdb"
         write_generation(result, group_dir / rel, sidecar_dir=group_dir, sidecar_stem=stem)
@@ -280,6 +299,24 @@ def _write_effects(effects, path: Path) -> None:
         con.close()
 
 
+def _write_series(series, path: Path) -> None:
+    """One world's metric series: totals and single-dimension slices."""
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        con.register("_series", series)
+        con.execute(
+            "COPY (SELECT CAST(date AS DATE) AS date, metric, dimension, value, "
+            "v AS metric_value, numerator, denominator FROM _series "
+            "WHERE dimension IS NULL OR NOT contains(dimension, ',') "
+            "ORDER BY metric, dimension NULLS FIRST, value NULLS FIRST, date) "
+            f"TO '{path}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+    finally:
+        con.close()
+
+
 def _build_group(job: dict[str, Any]) -> dict[str, Any]:
     """Build every world of one (regime, seed). Top-level so it pickles.
 
@@ -299,9 +336,12 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
     group_dir.mkdir(parents=True, exist_ok=True)
 
     layer = fills = None
-    if job["effects"]:
+    singles_dims: list[tuple[str, ...]] = []
+    if job["effects"] or job["series"]:
         layer = SemanticLayer.for_vertical(get_vertical(cfg.company.vertical), job["dbt_root"])
         fills = {name: layer.fill_value(name) for name in layer.metrics}
+        if job["series"]:
+            singles_dims = layer.single_dimension_sets()
 
     # Which slices each single is measured on follows from its anomaly's root
     # label, so the null world (built first) can carry every slice its twins
@@ -323,23 +363,31 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
     null_series = None
     for plan in job["plans"]:
         result = generate(cfg, seed=seed, anomalies=plan.selection)
-        con = effects_rel = None
+        con = effects_rel = series_rel = None
         try:
-            measure = layer is not None and plan.kind in ("null", "single")
-            if measure:
+            twin = job["effects"] and plan.kind in ("null", "single")
+            if twin or job["series"]:
                 con = layer.build_marts(result.frames, result.tables)
-            elif fmt == "parquet":
+            elif fmt == "parquet" and job["raw"]:
                 con = _raw_connection(result)
-            if measure and plan.kind == "null":
-                null_series = layer.series_from(con, result.calendar, null_sets)
-            elif measure:
+            series = None
+            if con is not None and layer is not None and (twin or job["series"]):
+                own = null_sets if plan.kind == "null" else sets_by_plan[plan.id]
+                wanted = list(dict.fromkeys([*singles_dims, *(own if twin else [])]))
+                series = layer.series_from(con, result.calendar, wanted)
+            if job["series"]:
+                series_rel = (rel_dir / f"{plan.stem}.series.parquet").as_posix()
+                _write_series(series, out_dir / series_rel)
+            if twin and plan.kind == "null":
+                null_series = series
+            elif twin:
                 record = result.ground_truth[0]
-                series = layer.series_from(con, result.calendar, sets_by_plan[plan.id])
                 labels = {",".join(s) for s in sets_by_plan[plan.id]}
-                twin = null_series[
-                    null_series["dimension"].isna() | null_series["dimension"].isin(labels)
-                ]
-                effects = twin_effects(twin, series, fills)
+
+                def measured(frame, labels=labels):
+                    return frame[frame["dimension"].isna() | frame["dimension"].isin(labels)]
+
+                effects = twin_effects(measured(null_series), measured(series), fills)
                 summary = summarize_twin(effects, record.start, record.end)
                 fields = ground_truth_fields(
                     summary, record.affected_metrics, record.root_metric, record.root_slice
@@ -354,16 +402,16 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
                 out["summaries"].append(summary)
                 if fields.get("root_metric_confirmed") is False:
                     root = fields["root_effect"]
-                    out["warnings"].append(
-                        f"{plan.id}: root metric {record.root_metric!r}"
-                        + (
-                            f" at {record.root_dimension}={record.root_value}"
-                            if record.root_slice
-                            else ""
-                        )
-                        + f" did not clear its noise floor (rel_change={root['rel_change']})"
+                    where = (
+                        f" at {record.root_dimension}={record.root_value}"
+                        if record.root_slice
+                        else ""
                     )
-            rel = _write_world(result, group_dir, plan.stem, fmt, con=con)
+                    out["warnings"].append(
+                        f"{plan.id}: root metric {record.root_metric!r}{where} did not clear "
+                        f"its noise floor (rel_change={root['rel_change']})"
+                    )
+            rel = _write_world(result, group_dir, plan.stem, fmt, con=con, raw=job["raw"])
         finally:
             if con is not None:
                 con.close()
@@ -376,11 +424,12 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
                 kind=plan.kind,
                 anomalies=[r.id for r in result.ground_truth],
                 twin_of=plan.twin_of,
-                path=(rel_dir / rel).as_posix(),
+                path=None if rel is None else (rel_dir / rel).as_posix(),
                 ground_truth=(rel_dir / f"{plan.stem}.ground_truth.json").as_posix(),
                 run_manifest=(rel_dir / f"{plan.stem}.run_manifest.json").as_posix(),
                 config_hash=result.manifest["config_hash"],
                 effects=effects_rel,
+                series=series_rel,
             ).model_dump(mode="json")
         )
     return out
@@ -410,6 +459,8 @@ def build_world_set(
     jobs: int = 1,
     overrides: dict[str, Any] | None = None,
     effects: bool = True,
+    series: bool = True,
+    raw: bool = True,
     dbt_root: str | Path | None = None,
 ) -> WorldSetManifest:
     """Generate a world set into ``out_dir`` and write its ``worlds.json``.
@@ -417,7 +468,9 @@ def build_world_set(
     ``overrides`` (dotted path -> value) apply to every world, on top of each
     regime's own. ``jobs`` builds (regime, seed) groups in parallel processes;
     the output does not depend on it. ``effects=False`` skips the measured
-    effects (they need the repo's dbt projects, found under ``dbt_root``).
+    effects and ``series=False`` the per-world metric series (both need the
+    repo's dbt projects, found under ``dbt_root``). ``raw=False`` skips the
+    raw tables, for consumers that read only series and effects.
     A single world whose root metric does not clear its noise floor raises a
     :class:`RootNotConfirmedWarning`; the world is still written and its
     ground truth says ``root_metric_confirmed: false``.
@@ -449,12 +502,15 @@ def build_world_set(
     )
     if not plans:
         raise ValueError("nothing to build: ask for --null, --singles and/or --story")
+    if not raw and not series and not effects:
+        raise ValueError("raw=False with neither series nor effects would write no data")
     measured = effects and bool(single_names)
     layer = None
-    if measured:
+    if measured or series:
         from .semantic import SemanticLayer
 
         layer = SemanticLayer.for_vertical(get_vertical(vertical), dbt_root)
+    stocks = get_vertical(vertical).stock_metrics()
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -471,6 +527,8 @@ def build_world_set(
             "format": fmt,
             "overrides": dict(overrides or {}),
             "effects": measured,
+            "series": series,
+            "raw": raw,
             "dbt_root": None if dbt_root is None else str(dbt_root),
         }
         for (regime, seed), group in groups.items()
@@ -513,6 +571,16 @@ def build_world_set(
                 type=layer.metrics[name].kind,
                 fill_nulls_with=layer.fill_value(name),
                 dimensions=layer.dimensions(name),
+                time_aggregation=layer.time_aggregation(name, stocks),
+                inputs=(
+                    {
+                        "numerator": layer.metrics[name].inputs["num"],
+                        "denominator": layer.metrics[name].inputs["den"],
+                    }
+                    if layer.metrics[name].kind == "ratio"
+                    else dict(layer.metrics[name].inputs)
+                ),
+                expr=layer.metrics[name].expr,
             )
             for name in sorted(layer.metrics)
         ]

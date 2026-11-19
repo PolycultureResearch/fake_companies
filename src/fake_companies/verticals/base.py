@@ -136,6 +136,10 @@ class Vertical(Protocol):
         """The metric (and slice of it) a rate anomaly on ``driver`` moves first."""
         ...
 
+    def stock_metrics(self) -> frozenset[str]:
+        """Metrics that are levels (end-of-period), not flows to be summed."""
+        ...
+
     def dbt_project(self) -> str:
         """Directory name of this vertical's dbt project under ``dbt/``."""
         ...
