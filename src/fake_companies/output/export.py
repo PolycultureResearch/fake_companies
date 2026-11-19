@@ -43,27 +43,38 @@ def export_tables(db_path: str | Path, out_dir: str | Path, fmt: str = "parquet"
     return written
 
 
-def write_raw_parquet(frames, tables, out_dir: str | Path) -> list[Path]:
+def write_raw_parquet(frames, tables, out_dir: str | Path, con=None) -> list[Path]:
     """Write a run's raw tables straight to ``<schema>.<table>.parquet`` files.
 
     The world-set Parquet format: the same typed tables a DuckDB database
     would hold (frames go through the same writer and DDL), without the
     database. Rows are fully ordered, so the bytes are a function of the rows.
+    ``con`` is a connection that already holds the raw tables (the one the
+    metric series were computed on); without it the frames are loaded into a
+    throwaway in-memory database.
     """
     from .duckdb_writer import DuckDBWriter
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = []
-    with DuckDBWriter(":memory:", list(tables)) as writer:
+    writer = None
+    if con is None:
+        writer = DuckDBWriter(":memory:", list(tables))
         for spec in tables:
             writer.write(spec.fqn, frames[spec.fqn])
+        con = writer.con
+    written: list[Path] = []
+    try:
+        for spec in tables:
             dest = out / f"{spec.fqn}.parquet"
-            writer.con.execute(
+            con.execute(
                 f"COPY (SELECT * FROM {spec.fqn} ORDER BY ALL) "
                 f"TO '{dest}' (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
             written.append(dest)
+    finally:
+        if writer is not None:
+            writer.close()
     return written
 
 

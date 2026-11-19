@@ -85,26 +85,38 @@ def worlds(
     set_: list[str] | None = typer.Option(
         None, "--set", help="Override applied to every world (dotted.path=value, repeatable)."
     ),
+    effects: bool = typer.Option(
+        True,
+        "--effects/--no-effects",
+        help="Measure each single world against its null twin (needs the repo's dbt/ projects).",
+    ),
 ) -> None:
     """Build a world set: seeds x regimes x (null, singles, story) plus worlds.json."""
+    import warnings
+
     from .config.overrides import parse_overrides
-    from .worlds import MANIFEST_NAME, build_world_set, parse_seeds
+    from .worlds import MANIFEST_NAME, RootNotConfirmedWarning, build_world_set, parse_seeds
 
     try:
-        manifest = build_world_set(
-            config,
-            out,
-            seeds=parse_seeds(seeds),
-            regimes=regime,
-            null=null,
-            singles=singles,
-            story=story,
-            fmt=fmt,
-            jobs=jobs,
-            overrides=parse_overrides(set_),
-        )
-    except ValueError as e:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RootNotConfirmedWarning)
+            manifest = build_world_set(
+                config,
+                out,
+                seeds=parse_seeds(seeds),
+                regimes=regime,
+                null=null,
+                singles=singles,
+                story=story,
+                fmt=fmt,
+                jobs=jobs,
+                overrides=parse_overrides(set_),
+                effects=effects,
+            )
+    except (ValueError, FileNotFoundError) as e:
         raise typer.BadParameter(str(e)) from None
+    for w in caught:
+        typer.echo(f"warning: {w.message}", err=True)
     kinds = [w.kind for w in manifest.worlds]
     typer.echo(
         f"Built {len(manifest.worlds)} worlds ({kinds.count('null')} null, "
