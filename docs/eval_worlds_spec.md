@@ -454,6 +454,303 @@ of the final day places its order past the timeline; the returns stage indexed
 one row past the driver panel. Fixed by clipping the index, which changes no
 run that completed before.
 
+## 9. The ten-seed study (2026-11-19)
+
+Ten-seed world sets (seeds 0–9, baseline regime, null plus every single,
+series and effects, `--no-raw`, three jobs on a 12-core laptop) for the four
+demo configs, built after the label corrections of §8:
+
+| Set | Worlds | Build time | Size (no raw tables) |
+|---|---|---|---|
+| Bristlecone (cpg_wholesale) | 80 | 9 s | 19 MB |
+| Meridian (b2b_services) | 80 | 43 s | 31 MB |
+| Alpenglow (retail_dtc) | 80 | 10 min 54 s | 88 MB |
+| White Cube (b2c_saas) | 110 | 30 min 21 s | 136 MB |
+
+All numbers below are the relative change of the window mean (single world
+over null world, minus one) over the anomaly's declared window, averaged over
+the ten seeds, with its standard error (sd across seeds / √10).
+
+**Criterion.** An effect is *established* when |mean| / SEM ≥ 3.25, the
+two-sided 1% point of t with 9 degrees of freedom. 1% and not 5% because
+about seventy (anomaly, metric) pairs are tested. Otherwise it is *open*.
+
+### 9.1 What ten seeds settled
+
+Every root is established in the declared direction in 10 of 10 seeds, for
+all 15 scripted rate anomalies.
+
+**Alpenglow: everything declared is now established.** The six entries that
+were unclear at three seeds are settled, all in the declared direction:
+
+| Anomaly | Metric | Effect | SEM | t |
+|---|---|---|---|---|
+| mobile_checkout_bug | orders | −3.9% | 0.44 | −8.9 |
+| | units | −3.9% | 0.39 | −9.8 |
+| | gross_revenue | −3.5% | 0.73 | −4.8 |
+| | net_revenue | −4.0% | 0.77 | −5.2 |
+| paid_social_budget_cut | orders / units / gross_revenue / net_revenue | −5.6% each | 0.40–0.50 | −11 to −14 |
+| tees_demand_slump | gross_revenue +4.5%, net_revenue +4.8%, gross_margin +3.9%, aov +4.6%, margin_rate −0.6% | | | 13 to 23 |
+| jackets_sizing_recall | return_rate +11.5%, refunds +27.8%, net_revenue −2.3% | | | 25 to 38 |
+
+**Bristlecone: everything established, to three or four digits.** The twin
+streams are aligned, so one seed is enough for any effect there.
+
+**Meridian: settled except the tail of one anomaly.**
+
+| Anomaly | Established | Still open |
+|---|---|---|
+| outbound_team_turnover | leads −18.0%, qualified_deals −14.7% (t −8.7), proposals_sent −11.4% (t −4.6), open_deals −11.3%, open_pipeline_value −8.9% (t −3.6) | negotiations −2.6% ± 4.4, deals_won −1.1% ± 7.5, bookings +1.5% ± 9.8, invoiced_revenue −8.3% ± 3.2 (t −2.6) |
+| healthcare_proposal_stall | all five: negotiations −8.5%, deals_won −6.0%, win_rate −6.2%, bookings −6.2% (t −6.1), invoiced_revenue −2.3% | none |
+| discounting_creep | all four: avg_deal_size −7.8%, bookings −7.5%, invoiced_revenue −3.1%, open_pipeline_value −15.5% | none |
+| legal_backlog | all eight, including the five added in §8: proposals_sent −16.9%, negotiations −29.3%, deals_won −30.8%, bookings −31.2%, invoiced_revenue −12.1% | none |
+
+The four open entries of `outbound_team_turnover` are open for two reasons at
+once. The lead cut is four weeks long and a deal needs weeks to reach
+negotiation, so inside the declared window the expected effect on the late
+stages is close to zero; and this is the one Meridian anomaly whose twins
+diverge from day one, so the noise is at its worst (§9.3). Over the window
+plus 90 days the late stages come out as negotiations −4.7% (t −2.6),
+deals_won −4.3% (t −3.0), bookings −0.6% (t −0.1): still not established.
+
+**White Cube: the funnel top is settled; new subscriptions and new MRR are
+not, for five of seven anomalies.**
+
+| Anomaly | Established | Still open |
+|---|---|---|
+| latam_campaign_spend_ramp | marketing_spend +9.1%, sessions +5.8%, signups +4.9% (t 9.6), trials_started +5.7% (t 4.6) | new_subscriptions +2.9% ± 2.3, new_mrr +1.4% ± 2.3, mrr +0.3% ± 0.8 |
+| brazil_lift_paid_social | visit_signup_rate +2.8%, signups +2.8%, trials_started +2.6% (t 8.4) | new_subscriptions +2.4% ± 1.5, new_mrr +2.5% ± 2.0 |
+| brazil_lift_organic | visit_signup_rate +3.0%, signups +3.0%, trials_started +2.8% | new_subscriptions +1.6% ± 1.2, new_mrr +2.3% ± 1.6 |
+| brazil_lift_referral | visit_signup_rate +0.9%, signups +0.9%, trials_started +0.75% (t 4.0) | new_subscriptions +1.4% ± 1.0, new_mrr +0.3% ± 1.1 |
+| onboarding_revamp | trial_days_active +89%, trial_activation_rate +41%, trial_conversion_rate +29%, trial_conversions +29%, new_subscriptions +17%, new_mrr +17% | product_events +1.4% ± 0.7 (t 1.9; it looked settled at three seeds and is not) |
+| mobile_signup_cta_regression | visit_signup_rate −6.75%, signups −6.75%, trials_started −7.0% | new_subscriptions −3.1% ± 1.1 (t −2.8), new_mrr −3.3% ± 1.1 (t −2.9) |
+| professional_churn_spike | all five: churned_subscriptions +28%, customer_churn_rate +30%, churned_mrr +49%, active_subscriptions −1.4%, mrr −2.2% | none |
+
+Newly settled against the three-seed table: the ramp's and the referral
+lift's trials_started (both up). For the spend ramp, new_subscriptions
+(+5.8%, t 4.6) and new_mrr (+5.3%, t 3.7) are established over the window
+plus 90 days: a ramp holds its level, so the effect keeps arriving. Every
+open entry has the declared sign in its mean; none is contradicted.
+
+Data-quality anomalies: in every seed, `pos_feed_outage` moves pos_units and
+pos_dollars, `orders_session_id_nulls` moves session_orders,
+`deals_closed_at_nulls` moves open_deals and open_pipeline_value,
+`product_pipeline_outage` moves product_events, dau, wau and the paying-activity metrics, and the other eight move no metric (`metrics_moved: []`).
+
+### 9.2 How precisely the effect size is known
+
+Relative precision is SEM / |effect| at ten seeds. "Seeds for ±20%" is the
+number of seeds at which the 95% interval is within ±20% of the effect:
+(1.96 · sd / (0.2 · |effect|))².
+
+| Anomaly | Root (slice) | Precision | Seeds ±20% | Top of tree | Effect | Precision | Seeds ±20% |
+|---|---|---|---|---|---|---|---|
+| Alpenglow mobile_checkout_bug | conversion_rate[paid_search, mobile] −46.0% | 3.3% | 2 | net_revenue | −4.0% | 19% | 35 |
+| Alpenglow jackets_sizing_recall | returned_units[jackets] +80.7% | 3.7% | 2 | net_revenue | −2.3% | 3% | 1 |
+| Alpenglow paid_social_budget_cut | marketing_spend[paid_social] −50.0% | 0.0% | 1 | net_revenue | −5.7% | 9% | 8 |
+| Alpenglow tees_demand_slump | units[tees] −25.0% | 1.4% | 1 | net_revenue | +4.8% | 5% | 3 |
+| Meridian outbound_team_turnover | leads[outbound] −43.9% | 3.4% | 2 | bookings | +1.5% | 670% | about 43,000 |
+| Meridian healthcare_proposal_stall | negotiations[healthcare] −37.1% | 5.6% | 3 | bookings | −6.2% | 16% | 27 |
+| Meridian discounting_creep | avg_deal_size −7.8% | 5.2% | 3 | bookings | −7.5% | 3% | 2 |
+| Meridian legal_backlog | sales_cycle_days +15.2% | 4.7% | 3 | bookings | −31.2% | 5% | 3 |
+| Bristlecone, all four | exact to 0.1–0.2% | | 1 | wholesale_net_revenue | −7.5%, −7.8%, 0 (decoupled), +6.6% | ≤ 2% | 1 |
+| White Cube latam_campaign_spend_ramp | marketing_spend[paid_social] +17.5% | 0.3% | 1 | mrr (level at window end) | +0.45% | 180% | about 3,100 |
+| White Cube brazil_lift_paid_social | visit_signup_rate[paid_social, BR] +122% | 5.5% | 3 | mrr | +1.4% | 53% | 272 |
+| White Cube brazil_lift_organic | visit_signup_rate[organic, BR] +129% | 3.5% | 2 | mrr | +2.1% | 26% | 68 |
+| White Cube brazil_lift_referral | visit_signup_rate[referral, BR] +103% | 10.5% | 11 | mrr | +0.3% | 282% | about 7,700 |
+| White Cube onboarding_revamp | trial_days_active +89% | 0.6% | 1 | mrr | +4.5% | 20% | 39 |
+| White Cube mobile_signup_cta_regression | visit_signup_rate[paid_social, mobile] −48.9% | 1.2% | 1 | mrr | −0.7% | 34% | 112 |
+| White Cube professional_churn_spike | churned_subscriptions[professional] +105% | 5.4% | 3 | mrr | −3.2% | 8% | 6 |
+
+So measured effects can serve as ground truth for attribution sizes at the
+root everywhere (ten seeds give 5% or better), and at the top of the tree for
+CPG, for the aligned retail and B2B anomalies, and for retail spend and
+conversion anomalies with 10 to 35 seeds. They cannot for a B2B lead-volume
+anomaly's effect on bookings, nor for the effect on MRR of any White Cube acquisition
+anomaly (68 to several thousand seeds). For those, the size at the top of the
+tree has to come from the generator's own arithmetic or from a much larger
+magnitude, not from twins.
+
+### 9.3 Which metrics have usable twin truth
+
+The per-twin noise of a metric is the spread across seeds of its window
+relative change. It depends on the anomaly: zero or near it when the twins'
+streams stay aligned, large when they diverge from day one. The table gives
+the worst anomaly for each metric, the smallest effect ten seeds can
+establish against that noise, and the seeds needed to pin a 5% effect to
+±20%.
+
+**CPG.** Every metric: noise 0.2–0.6%, one seed is enough. Usable.
+
+**Retail** (worst case is the conversion or spend anomaly):
+
+| Metric | Per-twin noise | Smallest effect at 10 seeds | Seeds for a 5% effect ±20% |
+|---|---|---|---|
+| sessions, marketing_spend, margin_rate | 0.3–0.4% | 0.3–0.5% | 1 |
+| new_customers, converting_sessions, units, orders, conversion_rate | 1.0–1.4% | 1.1–1.4% | 5–8 |
+| aov, gross_margin, gross_revenue, payments_captured, net_revenue | 1.9–2.4% | 2.0–2.5% | 14–23 |
+| repeat_order_share, returning_customer_orders | 4–5% | 4–5% | 63–95 |
+| refunds, returned_units, return_rate | 9–11% | 9–11% | 310–460 |
+| payment_failures | 16% | 17% | about 1,000 |
+
+Usable at ten seeds: everything down to net revenue for effects of 2.5% or
+more. Returns metrics are usable only under the return-rate and
+category-demand anomalies, where the streams are aligned (smallest
+establishable effect 1.1–2.4%);
+under a conversion or spend anomaly they are not usable at any practical seed
+count.
+
+**B2B** (worst case is `leads.outbound`, the only anomaly that re-deals the
+pipeline; under the other three the noise is 0–8%):
+
+| Metric | Per-twin noise | Smallest effect at 10 seeds | Seeds for a 5% effect ±20% | for a 20% effect |
+|---|---|---|---|---|
+| leads, deals_lost, open_deals, closed_deals | 2.4–3.5% | 2.5–3.6% | 23–47 | 2–3 |
+| sales_cycle_days, qualified_deals | 4.7–5.4% | 4.9–5.5% | 87–111 | 6–7 |
+| open_pipeline_value, proposals_sent | 7.8% | 8.0% | 230 | 15 |
+| invoiced_revenue | 10% | 10.5% | 400 | 26 |
+| negotiations | 14% | 14% | 740 | 47 |
+| avg_deal_size, collected_cash, deals_won, win_rate | 19–24% | 19–25% | 1,400–2,200 | 86–140 |
+| bookings | 31% | 32% | about 3,700 | 230 |
+
+The suspicion was right: under a lead-volume anomaly, B2B from negotiations
+down has no usable twin truth at any practical seed count. A few dozen deals
+close in a window and each is a lognormal amount, so two realizations of the
+same company differ by 30% in window bookings. Under stage-conversion,
+deal-size and cycle-time anomalies the twins are aligned up to the affected
+stage and the same metrics are usable at ten seeds.
+
+**B2C** (worst case is the spend ramp, which re-deals sessions; MRR and
+active subscriptions are stocks, so their noise is a level difference):
+
+| Metric | Per-twin noise | Smallest effect at 10 seeds | Seeds for a 5% effect ±20% |
+|---|---|---|---|
+| marketing_spend, sessions, wau | 0.1–0.7% | 0.1–0.7% | 1–2 |
+| visit_signup_rate, signups, arpu, dau | 1.4–1.8% | 1.5–1.8% | 8–13 |
+| active_subscriptions, mrr, trial_days_active, payments | 2.5–3.1% | 2.6–3.2% | 24–37 |
+| trials_started, trial_activation_rate, member_activity_rate, product_events | 3.6–4.7% | 3.7–4.8% | 51–84 |
+| new_subscriptions, new_mrr, revenue, net_new_mrr, trial_conversion_rate, trial_conversions | 7–10% | 7–10% | 200–360 |
+| churned_subscriptions, churned_mrr, customer_churn_rate, reactivations | 10–12% | 10–12% | 360–540 |
+| expansion_mrr, failed_payments, payment_failure_rate | 22–24% | 23–25% | 1,900–2,300 |
+| contraction_mrr | 95% | 97% | about 34,000 |
+
+Usable at ten seeds: traffic, signups, trials started, and the stocks for
+effects of 3% or more. New subscriptions and new MRR need an effect of 7% or
+more (the onboarding revamp qualifies; the acquisition anomalies, at 1–3%,
+do not at any practical seed count). Churn metrics are usable under a churn
+anomaly (established at t 13–16) because the effect is large, not because the
+noise is small. Upgrade and downgrade MRR have no usable twin truth.
+
+### 9.4 Stories too small to see from the top of the tree
+
+Criterion: the anomaly's effect on the top-of-tree metric inside its window
+(cross-seed mean) is smaller than that metric's week-to-week noise, taken as
+the robust standard deviation of the week-over-week relative change of the
+weekly metric in the ten null worlds. That noise still contains growth and
+seasonality a model would explain, so it is an upper bound; "expected z" is
+the more generous reading, effect × √(weeks in window) over the per-week
+noise (the week-over-week figure divided by √2).
+
+| Company (top metric, weekly noise) | Anomaly | Effect at top | Effect / noise | Expected z over the window |
+|---|---|---|---|---|
+| Alpenglow (net_revenue, 7.3%) | mobile_checkout_bug | −4.0% | 0.55 | 1.0 |
+| | jackets_sizing_recall | −2.3% | 0.31 | 1.0 |
+| | paid_social_budget_cut | −5.7% | 0.77 | 1.9 |
+| | tees_demand_slump | +4.8% | 0.66 | 1.3 |
+| Meridian (bookings, 48%) | outbound_team_turnover | +1.5% (not established) | 0.03 | 0.1 |
+| | healthcare_proposal_stall | −6.2% | 0.13 | 0.4 |
+| | discounting_creep | −7.5% | 0.16 | 0.6 |
+| | legal_backlog | −31.2% | 0.65 | 2.2 |
+| Bristlecone (wholesale_net_revenue, 7.6%) | teas_demand_scare | −7.5% | 0.99 | 2.0 |
+| | tinctures_viral_spike | +6.6% | 0.87 | 1.7 |
+| | brand_budget_cut | 0 (decoupled by design) | 0 | 0 |
+| White Cube (mrr, 1.3%) | latam_campaign_spend_ramp | +0.45% (not established) | 0.35 | 1.2 |
+| | brazil_lift_referral | +0.3% (not established) | 0.20 | 1.0 |
+| | mobile_signup_cta_regression | −0.7% (not established) | 0.56 | 1.9 |
+
+Those fourteen (thirteen without the deliberately decoupled one) cannot test localization from the top: a tool that starts at
+revenue, MRR or bookings has no gap there to explain. Five clear the bar:
+Bristlecone `whole_earth_delisting` (−7.8%, ratio 1.03, z 3.6) and White Cube
+`brazil_lift_paid_social` (+1.4%, 1.09, z 5.3), `brazil_lift_organic`
+(+2.1%, 1.61, z 7.9), `onboarding_revamp` (+4.5%, 3.4, z 20) and
+`professional_churn_spike` (−3.2%, 2.5, z 10.6).
+Every Alpenglow and Meridian story is below the bar. They remain good tests
+of detection and attribution at or near the root, where every effect is
+several times the noise.
+
+### 9.5 What keeping twins aligned would take (not done; for a later decision)
+
+Read off the builders, not measured: nothing below was prototyped.
+
+The noise has two layers, and they need different fixes.
+
+**Layer 1: draws that are not in time order, and streams shared across
+branches.** This is what makes a twin differ *before* the anomaly and in
+branches the anomaly cannot reach. It is fixable without touching the
+statistical model:
+
+| Builder (stream) | What breaks alignment | Change |
+|---|---|---|
+| `shared/traffic.py` (`traffic`) | One stream for all channels, consumed channel by channel; within a channel each attribute (time of day, country, device, duration, page views, landing page) is drawn as one array over all sessions, so a different session count re-deals every later attribute and every later channel. | A stream per channel and attribute (`traffic.<channel>.<attribute>`). Then a channel the anomaly does not touch is identical, and rows before the anomaly are identical. |
+| `shared/marketing.py`, `cpg .../marketing.py` (`marketing`) | One stream across channels and campaigns. | A stream per channel and campaign. |
+| `retail .../orders.py` (`retail_orders`) | Conversion uniforms are per session in time order (aligned); names are two arrays drawn after them. | Names from their own stream (cosmetic: no metric reads them). |
+| `retail .../repeat.py` (`retail_repeat`) | Frailty per customer, then one uniform per (customer, month) in customer order, then day, time and channel arrays. One extra customer shifts every later customer's repeat draws for all months. | Separate streams for frailty, the hit matrix, and each attribute; draw the hit matrix month-major. Still shifts when the customer count changes (layer 2). |
+| `retail .../basket.py`, `fulfillment.py`, `returns.py`, `payments.py` | Attribute arrays drawn one after another over all orders or lines. | A stream per attribute; lines-per-order from its own stream. |
+| `b2b .../pipeline.py` (`b2b_pipeline`) | Lead counts source by source, then about fifteen attribute arrays over all deals, all from one stream. | A stream per source for counts and per attribute for the rest. |
+| `b2c .../funnel.py`, `lifecycle.py`, `usage.py`, `billing.py` | Same pattern; the lifecycle walks months and draws per alive subscription. | A stream per decision (convert, churn, upgrade, ...) and per month. |
+| `corruption/loading.py` (`loading`) | One stream consumed table by table. | A stream per table. |
+
+All of these rename or split existing streams, which the hard rules forbid
+today: every one moves the B2C golden hashes (traffic, marketing, funnel,
+lifecycle, usage, billing and loading are all on the B2C path) and the bytes
+of every published demo bundle. Mechanically it is small per file and touches
+about twenty files.
+
+**Layer 2: entity position.** After layer 1 a twin still diverges from the
+anomaly onward, because a draw is tied to an entity's *position* in an array.
+One session fewer on day t and every later session of that channel takes its
+neighbour's draws; one customer more and every later customer does. This is
+the layer that makes B2B downstream and retail orders noisy, and no amount of
+stream splitting removes it. Removing it means keying each draw to the
+entity's identity instead of its position:
+
+- counts per (channel, day) from a generator spawned for that day
+  (`RngHub.spawn` already exists), with the day's sessions drawn from the same
+  generator, so a change on one day leaves the other days alone; a smaller
+  count keeps a prefix of the same sessions (thinning) instead of a new draw;
+- every downstream decision drawn from a hash of (stream name, stable entity
+  key), where the key is (channel, day, ordinal) for a session and inherits
+  down the chain (customer = its converting session, order = customer and
+  month, line = order and line number, deal = source, day and ordinal). A
+  vectorized integer hash to a uniform replaces `gen.random(n)`.
+
+With that, a single world would differ from its null world only in entities
+the anomaly actually changes, and a twin difference would be the causal
+effect with almost no realization noise, as it already is in CPG. It is a
+rewrite of the entity layer's randomness in all four verticals, it changes
+every generated byte, and the statistical tests would need re-running against
+the new draws. Poisson and binomial marginals are unchanged.
+
+A cheaper partial step that needs no rewrite: **thinning for rate decreases**.
+Session conversion already works this way (one uniform per session against a
+probability), which is why conversion and return-rate anomalies are aligned.
+Applying the same to lead and session *counts* (draw the null count, keep each
+entity with probability magnitude) would align the decrease anomalies
+(budget cuts, lead drops) but not increases.
+
+### 9.6 What this means for using measured effects as ground truth
+
+- **Direction and existence at the root:** settled for all fifteen, with any
+  seed count.
+- **Size at the root:** known to 5% or better at ten seeds (the Brazil
+  referral lift, 10%, is the one exception).
+- **Size at the top of the tree:** usable for CPG (exact), for B2B deal-size,
+  stage and cycle-time anomalies (3–16%), for retail (3–19%; 35 seeds bring
+  the checkout bug to ±20%), and in B2C for the churn spike and the
+  onboarding revamp. Not usable for a B2B lead-volume anomaly or for the B2C
+  acquisition anomalies, where the limit is the coupling of §9.5 and not the
+  number of seeds anyone will build.
+
 ---
 
 *This document is written and maintained by an AI agent (Claude), with human oversight.*
