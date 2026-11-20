@@ -500,14 +500,33 @@ run that completed before.
 
 Ten-seed world sets (seeds 0–9, baseline regime, null plus every single,
 series and effects, `--no-raw`, three jobs on a 12-core laptop) for the four
-demo configs, built after the label corrections of §8:
+demo configs, built after the label corrections of §8.
 
-| Set | Worlds | Build time | Size (no raw tables) |
+**Which rule these numbers were measured under.** This section was first
+written from sets built before the two `moved` fixes recorded at the end of
+§8. All four sets were then rebuilt at commit `b51d70e` (the current rule:
+the standard error of a window mean comes from the twins' divergence before
+the anomaly where they already differ, otherwise from the smaller of the
+placebo spread and the autocorrelation-widened σ/√n), and the study was run
+again on the rebuilt sets (2026-11-20):
+
+| Set | Worlds | Build time at `b51d70e` | Size (no raw tables) |
 |---|---|---|---|
-| Bristlecone (cpg_wholesale) | 80 | 9 s | 19 MB |
-| Meridian (b2b_services) | 80 | 43 s | 31 MB |
-| Alpenglow (retail_dtc) | 80 | 10 min 54 s | 88 MB |
-| White Cube (b2c_saas) | 110 | 30 min 21 s | 136 MB |
+| Bristlecone (cpg_wholesale) | 80 | 11 s | 32 MB |
+| Meridian (b2b_services) | 80 | 47 s | 61 MB |
+| Alpenglow (retail_dtc) | 80 | 9 min 32 s | 149 MB |
+| White Cube (b2c_saas) | 110 | 3 h 47 min wall clock | 240 MB |
+
+White Cube took 27 to 30 minutes in the two earlier builds; its CPU time rose
+only from 1.8 to 2.5 hours, so most of the wall clock is the laptop, not the
+code. The sets are larger than in the first build because `83640ca` added a
+per-twin `effects_summary.parquet` and slices to the effects tables.
+
+**Every cross-seed number in this section came out identical on the rebuild,
+to every digit printed.** That is expected: the rule changes how one twin is
+judged, not the twin series, and every number below is computed from the
+series. What did change is the per-twin `moved` flag, which §9.6 reports.
+No conclusion of §9.1 to §9.5 flipped.
 
 All numbers below are the relative change of the window mean (single world
 over null world, minus one) over the anomaly's declared window, averaged over
@@ -520,7 +539,9 @@ about seventy (anomaly, metric) pairs are tested. Otherwise it is *open*.
 ### 9.1 What ten seeds settled
 
 Every root is established in the declared direction in 10 of 10 seeds, for
-all 15 scripted rate anomalies.
+all 19 scripted rate anomalies (four each in Alpenglow, Meridian and
+Bristlecone, seven in White Cube; the first version of this section said 15,
+which was a miscount).
 
 **Alpenglow: everything declared is now established.** The six entries that
 were unclear at three seeds are settled, all in the declared direction:
@@ -722,7 +743,23 @@ several times the noise.
 
 ### 9.5 What keeping twins aligned would take (not done; for a later decision)
 
-Read off the builders, not measured: nothing below was prototyped.
+Read off the builders, not measured: nothing below was prototyped. One
+measurement does bear on it, and the current `moved` rule makes it visible:
+for how many of the metrics an anomaly touches (verdict not exactly zero)
+were the twins already different *before* the anomaly started? That is
+layer 1 below, directly observed.
+
+| Set | Anomalies whose twins differ before the start | Anomalies aligned until the start |
+|---|---|---|
+| Bristlecone | none | all |
+| Meridian | `outbound_team_turnover` (15 of 15 metrics) | the other three (at most 1 metric each) |
+| Alpenglow | `mobile_checkout_bug` (16 of 20), `paid_social_budget_cut` (21 of 22) | `jackets_sizing_recall`, `tees_demand_slump` |
+| White Cube | every rate anomaly (29 to 37 of 32 to 38 metrics) | none |
+
+These are the same anomalies whose downstream metrics are noisy in §9.3, and
+the same ones where `moved` now takes its standard error from the
+pre-anomaly divergence. Nothing about the coupling plan below changed with the
+rebuild.
 
 The noise has two layers, and they need different fixes.
 
@@ -780,10 +817,54 @@ Applying the same to lead and session *counts* (draw the null count, keep each
 entity with probability magnitude) would align the decrease anomalies
 (budget cuts, lead drops) but not increases.
 
-### 9.6 What this means for using measured effects as ground truth
+### 9.6 One twin's `moved` under the current rule
 
-- **Direction and existence at the root:** settled for all fifteen, with any
-  seed count.
+`moved` is a per-world flag; the cross-seed `verdict` is the per-anomaly
+answer. On the rebuilt sets:
+
+- **Roots: moved in 10 of 10 seeds for all 19 rate anomalies.** In the
+  intermediate build (rule of `83640ca`, before `b51d70e`) White Cube's spend
+  ramp root, +17.5% with no noise, was moved in 0 of 10; it is 10 of 10 again.
+- **Metrics with an exactly-zero verdict: never moved** (0 of 306 pairs
+  across the four sets).
+- **Metrics with an established verdict:** moved in 70–100% of seeds on
+  average (White Cube 70%, Alpenglow 75–91%, Meridian 80–96%, Bristlecone
+  100%). Small established effects under divergent twins are where one twin
+  misses: Alpenglow `mobile_checkout_bug` gross and net revenue (2 of 10),
+  Meridian `outbound_team_turnover` proposals and open pipeline value (3 and
+  1 of 10), White Cube brazil referral trials_started (0 of 10).
+- **Metrics with an open verdict:** moved in 5% of seeds on average in White
+  Cube (55 of 187 pairs move in at least one seed, one in half the seeds),
+  1% in Alpenglow. Under the earlier rule product events under the 17-week
+  onboarding anomaly moved in 10 of 10; now 1 of 10.
+- **Moved every time, with an open verdict, and both right.** Meridian
+  `healthcare_proposal_stall` moves `avg_deal_size` and `sales_cycle_days` in
+  10 of 10 seeds while neither is established across seeds. The twins are
+  aligned until the anomaly, and in each seed it really does change those
+  averages (by removing healthcare deals from the closed mix), but the sign
+  depends on which deals the seed had: −12% to +4% for deal size. The same
+  holds for Bristlecone `avg_case_price` under the delisting (5 of 10). Per
+  world the effect is real; there is no expected effect to score.
+- **Established, never moved in the window, also both right.** Meridian
+  `invoiced_revenue` under `healthcare_proposal_stall` (−2.3%) and
+  `legal_backlog` (−12.1%): invoicing lags, and its median onset is about
+  140 days after the anomaly starts. Use the window plus 90 days or `onset`.
+
+Changes against the sets the first version of this section was written from
+(before `83640ca`), all in this flag and none in a cross-seed number. Fewer
+spurious moves: White Cube onboarding `product_events` 10 → 1 of 10 and
+`trial_conversion_rate` 10 → 5; Meridian `outbound_team_turnover`
+`open_pipeline_value` 6 → 1. More real ones found: White Cube spend-ramp
+signups 0 → 10 and the organic lift's trials_started 6 → 10; Alpenglow
+`paid_social_budget_cut` orders and units 1–2 → 10, gross revenue 1 → 7, net
+revenue 1 → 4, and `mobile_checkout_bug` orders and units 0 → 6; Meridian
+`outbound_team_turnover` qualified deals 2 → 4 and proposals 1 → 3. The rest
+moved by one or two seeds either way. Bristlecone did not change.
+
+### 9.7 What this means for using measured effects as ground truth
+
+- **Direction and existence at the root:** settled for all nineteen, with
+  any seed count.
 - **Size at the root:** known to 5% or better at ten seeds (the Brazil
   referral lift, 10%, is the one exception).
 - **Size at the top of the tree:** usable for CPG (exact), for B2B deal-size,
@@ -792,6 +873,20 @@ entity with probability magnitude) would align the decrease anomalies
   onboarding revamp. Not usable for a B2B lead-volume anomaly or for the B2C
   acquisition anomalies, where the limit is the coupling of §9.5 and not the
   number of seeds anyone will build.
+- **Scoring attribution sizes** (the question Breakdown's runner deferred):
+  yes, against the cross-seed mean, for the (anomaly, metric) pairs whose
+  `verdict` is established and whose relative precision in §9.2 is about
+  20% or better; those are the root of every anomaly and the top-of-tree
+  cases in the previous bullet. Score the others on direction and
+  localization only. Do not score a size against one twin's difference where
+  the twins diverge before the anomaly (§9.5 table): that difference carries
+  realization noise as large as the effect. Where they are aligned
+  (Bristlecone, Meridian except the lead cut, Alpenglow returns and category
+  demand), one twin's difference is that world's own effect, exact in
+  Bristlecone and within the per-twin noise of §9.3 elsewhere (layer 2 still
+  re-deals entities after the start), and can be scored per world when that
+  noise is small next to the effect. The rebuild under the current `moved`
+  rule changed none of this.
 
 ---
 
