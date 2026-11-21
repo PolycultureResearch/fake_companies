@@ -12,6 +12,11 @@
 #                              decoupled from sales — the RCA decoy)
 #   4. tinctures_viral_spike — a viral moment lifts tincture demand 60% for
 #                              2 weeks, cascading into distributor reorders
+#
+# Scenarios added for the canonical tree (docs/canonical_trees.md): a teas
+# list-price increase, a Summit Mart destock alongside a tincture competitor
+# launch, a mild flu season, Summit Mart delisting capsules, and a slow
+# Greenfields shelf erosion.
 company:
   name: Bristlecone Botanicals
   slug: bristlecone
@@ -154,6 +159,55 @@ anomalies:
       target: consumer_demand.tinctures
       window: { start: 2025-09-08, end: 2025-09-21 }
       magnitude: 1.6
+    # --- Scenarios for the canonical tree (docs/canonical_trees.md) -------- #
+    # A list-price change: teas +8% at list and on the shelf, permanent.
+    # Volume answers with elasticity 1.2, so net sales barely move while
+    # price per case rises and cases fall: the price-volume question.
+    - name: teas_list_price_increase
+      kind: rate
+      type: level_shift
+      target: price.teas
+      window: { start: 2025-07-07 }
+      magnitude: 1.08
+    # Sell-in versus sell-through, with two causes at once: Summit Mart
+    # (mass) cuts its weeks of supply, reordering 60% of what it sold for
+    # four weeks, while a competitor launch dents tincture demand everywhere.
+    - name: summit_mart_destock
+      kind: rate
+      type: level_shift
+      target: ordering.mass
+      window: { start: 2025-10-06, end: 2025-11-02 }
+      magnitude: 0.6
+    - name: tinctures_competitor_launch
+      kind: rate
+      type: level_shift
+      target: consumer_demand.tinctures
+      window: { start: 2025-10-06, end: 2025-11-02 }
+      magnitude: 0.75
+    # A seasonal miss: a mild cold-and-flu season leaves winter tea demand
+    # 20% short of the usual peak.
+    - name: mild_flu_season
+      kind: rate
+      type: level_shift
+      target: consumer_demand.teas
+      window: { start: 2025-12-01, end: 2026-02-22 }
+      magnitude: 0.8
+    # A delisting: Summit Mart drops capsules for good.
+    - name: summit_mart_capsules_delisting
+      kind: rate
+      type: level_shift
+      target: consumer_demand.capsules
+      segment: { banner: summit_mart }
+      window: { start: 2026-01-05 }
+      magnitude: 0.02
+    # A slow drift: Greenfields gives up shelf space bit by bit; velocity
+    # erodes to 75% over twelve weeks and stays there.
+    - name: greenfields_shelf_erosion
+      kind: rate
+      type: ramp
+      target: velocity.greenfields
+      window: { start: 2026-03-02, end: 2026-05-24 }
+      magnitude: 0.75
     - name: pos_feed_outage
       kind: dq
       type: volume_dropout

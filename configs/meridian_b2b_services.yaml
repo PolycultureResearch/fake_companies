@@ -10,6 +10,11 @@
 #   3. discounting_creep        — end-of-year discounting cuts deal sizes 20% for 8 weeks
 #   4. legal_backlog            — contract review backlog stretches every stage 60%
 #                                for 6 weeks (cycle time up, bookings pushed out)
+#
+# Scenarios added for the canonical tree (docs/canonical_trees.md): a spring
+# inbound miss, a slow proposal-conversion drift, a delivery crunch
+# (invoicing lags bookings), a rate-card increase with negotiation pushback
+# at the same time, the referral channel lost, and a CRM sync gap.
 company:
   name: Meridian Partners
   slug: meridian
@@ -109,6 +114,55 @@ anomalies:
       target: cycle_time_scale
       window: { start: 2025-05-05, end: 2025-06-15 }
       magnitude: 1.6
+    # --- Scenarios for the canonical tree (docs/canonical_trees.md) -------- #
+    # A seasonal miss: inbound (website) leads run 30% short through the
+    # spring selling season.
+    - name: spring_inbound_miss
+      kind: rate
+      type: level_shift
+      target: leads.website
+      window: { start: 2025-02-24, end: 2025-04-27 }
+      magnitude: 0.7
+    # A slow drift: proposal-stage conversion erodes to 80% over twelve weeks
+    # as a competitor undercuts, and stays there.
+    - name: proposal_conversion_erosion
+      kind: rate
+      type: ramp
+      target: stage_conversion.qualified
+      window: { start: 2025-06-23, end: 2025-09-14 }
+      magnitude: 0.8
+    # Bookings versus invoicing: the delivery team falls behind and projects
+    # signed over eight weeks take 60% longer to deliver, so balance invoices
+    # arrive late while bookings hold.
+    - name: delivery_capacity_crunch
+      kind: rate
+      type: level_shift
+      target: delivery_time_scale
+      window: { start: 2025-07-07, end: 2025-08-31 }
+      magnitude: 1.6
+    # A pricing change and a second cause at once: a 12% rate-card increase
+    # (permanent), and buyers push back in negotiation for the first twelve
+    # weeks of it.
+    - name: rate_card_increase
+      kind: rate
+      type: level_shift
+      target: deal_size
+      window: { start: 2025-09-29 }
+      magnitude: 1.12
+    - name: rate_card_pushback
+      kind: rate
+      type: level_shift
+      target: stage_conversion.negotiation
+      window: { start: 2025-09-29, end: 2025-12-21 }
+      magnitude: 0.8
+    # A channel lost: the referral partner programme ends; referral leads
+    # fall to 30% for good.
+    - name: referral_partner_exit
+      kind: rate
+      type: level_shift
+      target: leads.referral
+      window: { start: 2025-11-03 }
+      magnitude: 0.3
     - name: stage_events_dupes
       kind: dq
       type: duplicate_rows
@@ -128,6 +182,14 @@ anomalies:
       window: { start: 2025-07-14, end: 2025-07-17 }
       magnitude: 0.5
       params: { column: closed_at }
+    # A data-quality break that moves metrics: the CRM sync drops half the
+    # stage events for a week, so stage counts dip with nothing behind it.
+    - name: stage_events_sync_gap
+      kind: dq
+      type: volume_dropout
+      target: crm.deal_stage_events
+      window: { start: 2025-10-06, end: 2025-10-12 }
+      magnitude: 0.5
   surprise:
     count: 2
     kinds: [rate, dq]
