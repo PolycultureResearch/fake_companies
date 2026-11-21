@@ -32,10 +32,14 @@ def apply_rate_events(
     known: set[str],
     affected: Callable[[str], list[str]],
     root: Callable[[str, dict[str, str] | None], RootLabel] | None = None,
+    affected_in_window: Callable[[str, object, object], list[str]] | None = None,
 ) -> tuple[DriverPanel, list[GroundTruthRecord]]:
     """Multiply anomaly windows into the panel; ``known``/``affected``/``root``
     come from the vertical (its driver catalog, driver->metric impact map and
-    driver->root-metric map)."""
+    driver->root-metric map). ``affected_in_window(driver, start, end)``,
+    when the vertical has one, replaces ``affected`` for metrics whose
+    movement depends on the anomaly's dates (retail discounted orders move
+    only inside a promotion)."""
     # Imported lazily to avoid a latent<->anomalies import cycle.
     from ..anomalies import rate_anomalies
 
@@ -63,7 +67,11 @@ def apply_rate_events(
                 start=a.window.start,
                 end=a.window.end,
                 magnitude=a.magnitude,
-                affected_metrics=affected(a.target),
+                affected_metrics=(
+                    affected(a.target)
+                    if affected_in_window is None
+                    else affected_in_window(a.target, a.window.start, a.window.end)
+                ),
                 params=a.params or {},
                 root_metric=label.metric if label else None,
                 root_dimension=label.dimension if label else None,

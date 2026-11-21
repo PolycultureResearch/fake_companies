@@ -76,6 +76,13 @@ class RetailDTCVertical:
 
         return affected_metrics_for_driver(driver)
 
+    def affected_metrics_in_window(self, cfg, driver: str, start, end) -> list[str]:
+        """``affected_metrics`` for one anomaly window (promotions decide
+        whether discounted orders move); see ``metrics.affected_metrics_in_window``."""
+        from .metrics import affected_metrics_in_window
+
+        return affected_metrics_in_window(cfg, driver, start, end)
+
     def root_label(self, driver: str, segment: dict[str, str] | None = None) -> RootLabel:
         from .metrics import root_label_for_driver
 

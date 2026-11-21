@@ -40,6 +40,15 @@ class GenerationResult:
     manifest: dict[str, str] = field(default_factory=dict)
 
 
+def _affected_in_window(vertical, cfg):
+    """The vertical's window-aware declaration, bound to this config, or None
+    (only retail has one: promotions decide whether discounted orders move)."""
+    hook = getattr(vertical, "affected_metrics_in_window", None)
+    if hook is None:
+        return None
+    return lambda driver, start, end: hook(cfg, driver, start, end)
+
+
 def generate(
     cfg: BaseScenarioConfig, seed: int | None = None, anomalies: str = "all"
 ) -> GenerationResult:
@@ -74,6 +83,7 @@ def generate(
         known=vertical.known_drivers(cfg),
         affected=vertical.affected_metrics,
         root=vertical.root_label,
+        affected_in_window=_affected_in_window(vertical, cfg),
     )
     ground_truth.extend(rate_gt)
 

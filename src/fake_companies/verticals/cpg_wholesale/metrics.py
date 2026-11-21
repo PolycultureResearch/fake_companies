@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from ..base import RootLabel, RootRule, resolve_root
 
+# trade_inventory_build is shipments less POS units: a demand or velocity
+# change moves POS at once and shipments a week later, so the build moves.
 _SALES_METRICS = [
     "pos_units",
     "pos_dollars",
     "shipped_cases",
     "wholesale_gross_revenue",
     "wholesale_net_revenue",
+    "trade_inventory_build",
 ]
 
 _DRIVER_METRICS: list[tuple[str, list[str]]] = [

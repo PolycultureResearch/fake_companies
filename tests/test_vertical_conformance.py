@@ -222,3 +222,37 @@ def test_declared_effects_match_what_was_measured():
         b2b
     )
     assert {"sales_cycle_days", "open_deals", "open_pipeline_value"} <= set(b2b)
+
+
+def test_new_metrics_are_declared_where_they_move():
+    """customer_base is the running total of new_customers; trade_inventory_build
+    is shipments less POS; discounted_orders exists only inside a promotion."""
+    import datetime as dt
+
+    from fake_companies.verticals.retail_dtc.metrics import affected_metrics_in_window
+
+    retail = REGISTRY["retail_dtc"]
+    for driver in ("spend.paid_social", "sessions.organic", "conversion_rate.paid_search"):
+        declared = retail.affected_metrics(driver)
+        assert "new_customers" in declared and "customer_base" in declared, driver
+    for driver in ("repeat_rate", "items_per_order", "category_demand.tees", "return_rate.tees"):
+        assert "customer_base" not in retail.affected_metrics(driver), driver
+    cpg = REGISTRY["cpg_wholesale"]
+    for driver in ("consumer_demand.teas", "velocity.whole_earth"):
+        assert "trade_inventory_build" in cpg.affected_metrics(driver)
+    assert cpg.affected_metrics("spend.paid_social") == ["marketing_spend"]  # still decoupled
+
+    cfg = load_config(REPO_ROOT / "configs" / "alpenglow_retail_dtc.yaml")
+    promo = cfg.promos[1]  # Black Friday 2024
+    inside = (promo.window.start, promo.window.end)
+    outside = (dt.date(2024, 9, 12), dt.date(2024, 9, 23))
+    for driver in ("conversion_rate.paid_search", "spend.paid_social", "repeat_rate"):
+        assert "discounted_orders" in affected_metrics_in_window(cfg, driver, *inside)
+        assert "discounted_orders" not in affected_metrics_in_window(cfg, driver, *outside)
+    # an open-ended window reaches every later promotion
+    assert "discounted_orders" in affected_metrics_in_window(
+        cfg, "sessions.organic", dt.date(2024, 9, 1), None
+    )
+    # drivers that cannot change how many orders there are never declare it
+    for driver in ("items_per_order", "category_demand.tees", "return_rate.tees"):
+        assert "discounted_orders" not in affected_metrics_in_window(cfg, driver, *inside)

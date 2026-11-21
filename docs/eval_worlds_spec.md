@@ -1059,13 +1059,43 @@ adding up day totals, and refused by name for anything else (a running
 distinct count is not a sum of days). Both stocks are in the verticals'
 `STOCK_METRICS`, so the manifest says `time_aggregation: end_of_period`.
 
-**Not added to the declared `affected_metrics`.** `customer_base` moves
-whenever `new_customers` does, and `trade_inventory_build` whenever POS or
-shipments do, but the declared map was left alone: adding them changes
-`meta.ground_truth` in the default output of the retail and CPG configs,
-which is Devon's call, as it was for §8's corrections. Their measured effects
-(`metrics_moved`, the verdicts) are there regardless. `discounted_orders`
-moves only while a promotion runs, so no driver declares it.
+**Declared in `affected_metrics` (Devon's decision, 2026-11-20; at first
+they were left out because it changes `meta.ground_truth` in the default
+retail and CPG output).**
+
+- `customer_base` for `spend.*`, `sessions.*` and `conversion_rate.*`: the
+  drivers that declare `new_customers`, of which it is the running total.
+- `trade_inventory_build` for `consumer_demand.*` and `velocity.*`: POS moves
+  at once and shipments a week later, so the build moves. Not for `spend.*`,
+  which stays decoupled from sales.
+- `discounted_orders` for `spend.*`, `sessions.*`, `conversion_rate.*` and
+  `repeat_rate` **only when the anomaly's window overlaps one of the
+  config's promotions** (an open-ended window overlaps every later one).
+  Promo codes exist only inside a promotion, so outside one there is
+  nothing to move. That makes this the one declaration that depends on the
+  anomaly's dates; retail supplies it through
+  `affected_metrics_in_window(cfg, driver, start, end)`, which `generate`
+  uses when a vertical has it. Drivers that cannot change how many orders
+  there are (`items_per_order`, `category_demand.*`, `return_rate.*`)
+  never declare it.
+
+Data-quality anomalies declare no metrics, as before (their truth is
+`affected_signals`). Measured on proof sets, the POS feed outage does move
+`trade_inventory_build` (the build is computed from POS rows), and
+`metrics_moved` records it.
+
+Checked against measured effects: on Bristlecone (3 seeds) the build is
+established in the declared direction under all three demand and velocity
+anomalies and exactly zero under the brand budget cut; on the retail smoke
+set (3 seeds) `customer_base` is established down (t −10.5) under the
+checkout regression, whose window overlaps the smoke promotion, while
+`discounted_orders` there is declared and still open (−3.6%, t −0.3: a
+small effect at three seeds). On Alpenglow (10 seeds) `customer_base` is
+established down under the checkout bug (t −18.5) and under the budget cut
+at 10% (t −2.3; open at 1%: a level's noise is large next to the customers a
+three-week cut loses, though `new_customers` there is t −31.6), and exactly
+zero under the tees mix shift; `discounted_orders` is undeclared for all
+three (no promotion in their windows) and measured zero in every seed.
 
 ### 10.4 `schema_version` 2
 
