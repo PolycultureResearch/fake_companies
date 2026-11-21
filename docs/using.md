@@ -307,6 +307,13 @@ A small set (three seeds) can rarely reach the 1% bar (|t| ≥ 9.9), so the same
 file also has `verdict_10pct`, the same test at two-sided 10% (|t| ≥ 2.9 at
 three seeds), which establishes about one in ten effects that do not exist:
 use it only when the strict one cannot answer, and say so.
+`rel_change` is the relative change of the window mean of the *daily
+values*; for a rate that averages daily ratios. `rel_change_aggregated` (per
+twin and in the ground truth; `rel_change_aggregated_mean` / `_sd` / `_sem`
+across seeds) is the change of the metric's value over the window by its own
+`time_aggregation`: Σnumerator / Σdenominator for a rate, the last day for a
+stock, the formula over its inputs for a derived metric, NULL for a distinct
+count. Score a rate's attribution against the aggregated one.
 `aligned_before_start` says, per anomaly, metric and slice, whether every
 seed's twins were identical before the anomaly's start (then one twin's
 difference is clean before it and `first_diff` is exact);

@@ -649,3 +649,37 @@ def test_an_effect_that_lasts_is_not_drowned_by_its_own_aftermath():
     row = summarize_twin(effects, start, end).iloc[0]
     assert row["moved"] and row["first_diff"] == start + dt.timedelta(days=1)
     assert row["rel_change"] == pytest.approx(0.175, abs=0.01)
+
+
+def test_a_rate_is_also_measured_as_a_ratio_of_window_sums():
+    """Daily ratios averaged weigh a quiet day like a busy one; the engine's
+    window value is the sum of numerators over the sum of denominators."""
+    from fake_companies.effects import evaluate_formula, window_value
+
+    days = pd.date_range(START, periods=4)
+    num_null, den_null = np.array([1.0, 1, 50, 50]), np.array([10.0, 10, 100, 100])
+    num_world, den_world = np.array([5.0, 5, 50, 50]), np.array([10.0, 10, 100, 100])
+    frame = pd.DataFrame({"date": days, "metric": "r", "dimension": None, "value": None})
+    null = frame.assign(v=num_null / den_null, numerator=num_null, denominator=den_null)
+    world = frame.assign(v=num_world / den_world, numerator=num_world, denominator=den_world)
+    effects = twin_effects(null, world, {"r": None})
+    spec = {"r": {"rule": "ratio_of_sums", "sides": ("sum", "sum"), "formula": None}}
+    row = summarize_twin(effects, days[0].date(), days[-1].date(), spec).iloc[0]
+    assert row["rel_change"] == pytest.approx(
+        ((0.5 + 0.5 + 0.5 + 0.5) / (0.1 + 0.1 + 0.5 + 0.5)) - 1
+    )
+    assert row["null_aggregated"] == pytest.approx(102 / 220)
+    assert row["rel_change_aggregated"] == pytest.approx((110 / 220) / (102 / 220) - 1)
+    # without a spec the aggregated columns stay empty
+    assert pd.isna(
+        summarize_twin(effects, days[0].date(), days[-1].date()).iloc[0]["rel_change_aggregated"]
+    )
+    # a flow over a stock: the stock side is its last day
+    assert (
+        window_value(np.array([1.0, 2.0]), np.array([10.0, 40.0]), ("sum", "end_of_period"))
+        == 3 / 40
+    )
+    assert np.isnan(window_value(np.array([1.0]), np.array([0.0]), ("sum", "sum")))
+    tree = {"op": "/", "args": [{"metric": "a"}, {"op": "nullif_zero", "args": [{"metric": "b"}]}]}
+    assert evaluate_formula(tree, {"a": 6.0, "b": 3.0}) == 2.0
+    assert np.isnan(evaluate_formula(tree, {"a": 6.0, "b": 0.0}))

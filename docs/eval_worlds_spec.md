@@ -1121,6 +1121,46 @@ clears the noise floor, weeks after the start for a ramp. The field names in
 the per-twin summary say `pre_onset` for historical reasons; they mean
 before the declared start.
 
+### 10.6 Effects by the metric's own aggregation rule
+
+**The problem.** `rel_change` is the relative change of the window mean of
+the *daily values*. For a rate that averages daily ratios, which weighs a
+quiet day like a busy one; Breakdown's engine takes a rate's window value as
+Σnumerator / Σdenominator, so the two numbers differ (on the B2C smoke set,
+`payment_failure_rate` under a budget cut: +14% by daily mean, −61% by the
+ratio of sums). The same holds for a stock, whose window value by the
+manifest's rule is its last day, not its mean.
+
+**Design.** Beside the existing numbers, each twin's
+`*.effects_summary.parquet` (every slice) and the ground truth's
+`measured_effects` gain:
+
+- `null_aggregated`, `world_aggregated`: the metric's value over the whole
+  declared window by its own `time_aggregation` (per-twin summary only);
+- `rel_change_aggregated`: `world_aggregated / null_aggregated − 1`.
+
+and the set's `effects_summary.parquet` gains `rel_change_aggregated_mean`,
+`_sd`, `_sem`, `_min`, `_max` and `t_across_seeds_aggregated`.
+
+The rule, per `metrics[].time_aggregation`:
+
+| Rule | Window value |
+|---|---|
+| `sum` | the window total (equals `rel_change` when every day is defined) |
+| `end_of_period`, `rolling_window` | the last defined day of the window |
+| `ratio_of_sums`, `ratio_of_aggregates`, `average` | each side aggregated by its own rule (`input_time_aggregation`; an average's sum and row count are both sums), then divided; NULL when the denominator is 0 |
+| `derived` | `formula` over its inputs' window values, same slice |
+| `count_distinct` | NULL: not derivable from days (anything derived from one is NULL too) |
+
+**Which is which.** `rel_change` (and every column without `_aggregated`)
+is the window mean of daily values; `*_aggregated` is the metric's own rule.
+The verdicts, `moved` and the noise numbers are about `rel_change`; they are
+unchanged. Score an attribution size against whichever matches how the tool
+aggregates the window. For a rate that is almost always
+`rel_change_aggregated`.
+
+Not a schema bump: every field is new, nothing existing changed meaning.
+
 ---
 
 *This document is written and maintained by an AI agent (Claude), with human oversight.*

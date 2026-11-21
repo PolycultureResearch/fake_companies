@@ -134,22 +134,31 @@ def twin_effects(
     from ``fills``, or left NULL when it has none.
     """
     keys = ["date", *_KEYS]
-    null, world = null[[*keys, "v"]], world[[*keys, "v"]]
-    merged = null.rename(columns={"v": "null_value"}).merge(
-        world.rename(columns={"v": "world_value"}), on=keys, how="outer", indicator=True
+    sides = [c for c in ("numerator", "denominator") if c in null and c in world]
+    null, world = null[[*keys, "v", *sides]], world[[*keys, "v", *sides]]
+    merged = null.rename(columns={"v": "null_value", **{c: f"null_{c}" for c in sides}}).merge(
+        world.rename(columns={"v": "world_value", **{c: f"world_{c}" for c in sides}}),
+        on=keys,
+        how="outer",
+        indicator=True,
     )
     fill = merged["metric"].map(fills).astype(float)
     only_world = (merged["_merge"] == "right_only").to_numpy()
     only_null = (merged["_merge"] == "left_only").to_numpy()
     merged.loc[only_world, "null_value"] = fill[only_world]
     merged.loc[only_null, "world_value"] = fill[only_null]
+    for c in sides:  # a side of a missing slice is an empty sum
+        has = merged[f"null_{c}"].notna() | merged[f"world_{c}"].notna()
+        merged.loc[only_world & has, f"null_{c}"] = 0.0
+        merged.loc[only_null & has, f"world_{c}"] = 0.0
     diff = merged["world_value"] - merged["null_value"]
     # Two sums over the same rows in another order differ in the last bits
     # (a duplicated row deduplicated by staging, say). That is not a difference.
     same = np.isclose(merged["world_value"], merged["null_value"], rtol=FLOAT_RTOL, atol=0.0)
     merged["diff"] = diff.mask(same, 0.0)
     merged = merged.sort_values(["metric", "dimension", "value", "date"], na_position="first")
-    return merged[EFFECT_COLUMNS].reset_index(drop=True)
+    extra = [f"{w}_{c}" for c in sides for w in ("null", "world")]
+    return merged[[*EFFECT_COLUMNS, *extra]].reset_index(drop=True)
 
 
 def _noise_sigma(
@@ -299,7 +308,71 @@ def _mean(a: np.ndarray) -> float:
     return float(a.mean()) if a.size else float("nan")
 
 
-def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -> pd.DataFrame:
+def _side_value(values: np.ndarray, rule: str) -> float:
+    """One side of a ratio over a window, by its input's time aggregation."""
+    defined = values[~np.isnan(values)]
+    if defined.size == 0:
+        return float("nan")
+    if rule == "sum":
+        return float(defined.sum())
+    if rule in ("end_of_period", "rolling_window"):
+        return float(defined[-1])
+    return float("nan")  # count_distinct and the like: not derivable from days
+
+
+def window_value(numerator: np.ndarray, denominator: np.ndarray, rules: tuple[str, str]) -> float:
+    """A ratio metric's value over a window by its own aggregation rule:
+    each side aggregated by its input's ``time_aggregation`` (``sum``: add the
+    days; ``end_of_period``: the last day), then divided. NaN when the
+    denominator is zero or undefined."""
+    num, den = _side_value(numerator, rules[0]), _side_value(denominator, rules[1])
+    if not np.isfinite(num) or not np.isfinite(den) or den == 0:
+        return float("nan")
+    return num / den
+
+
+def evaluate_formula(node: dict, values: dict[str, float]) -> float:
+    """A derived metric's formula tree (``SemanticLayer.formula``) over its
+    inputs' window values. NaN propagates; ``nullif_zero`` of 0 is NaN."""
+    if "const" in node:
+        return float(node["const"])
+    if "metric" in node:
+        return float(values.get(node["metric"], float("nan")))
+    args = [evaluate_formula(a, values) for a in node["args"]]
+    op = node["op"]
+    if op == "neg":
+        return -args[0]
+    if op == "nullif_zero":
+        return float("nan") if args[0] == 0 else args[0]
+    a, b = args
+    if op == "+":
+        return a + b
+    if op == "-":
+        return a - b
+    if op == "*":
+        return a * b
+    if op == "/":
+        return float("nan") if not np.isfinite(b) or b == 0 else a / b
+    raise ValueError(f"unknown formula op {op!r}")
+
+
+def _rule_value(values: np.ndarray, rule: str) -> float:
+    """A metric without sides over a window, by its ``time_aggregation``.
+    NaN where the rule cannot be applied to daily values (``count_distinct``)."""
+    if rule == "sum":
+        defined = values[~np.isnan(values)]
+        return float(defined.sum()) if defined.size else float("nan")
+    if rule in ("end_of_period", "rolling_window"):
+        return _side_value(values, rule)
+    return float("nan")
+
+
+def summarize_twin(
+    effects: pd.DataFrame,
+    start: dt.date,
+    end: dt.date | None,
+    aggregation: dict[str, dict[str, Any]] | None = None,
+) -> pd.DataFrame:
     """One row per series (metric x dimension x value) of an effects table.
 
     Columns: the series keys, then
@@ -308,7 +381,21 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
       anomaly's declared window (``start`` .. ``end``, or the end of the
       timeline for an open window);
     - ``rel_change``: ``world_mean / null_mean - 1`` over that window (NULL
-      when the null mean is zero or undefined);
+      when the null mean is zero or undefined). This is the window mean of
+      the *daily values*; for a ratio it averages daily ratios;
+    - ``null_aggregated`` / ``world_aggregated`` / ``rel_change_aggregated``:
+      the metric's value over the whole window by its own aggregation rule,
+      and the relative change of that. ``aggregation`` maps each metric to
+      ``{"rule": time_aggregation, "sides": (numerator rule, denominator
+      rule) or None, "formula": tree or None}`` (``worlds.aggregation_spec``).
+      ``sum``: the window total; ``end_of_period`` / ``rolling_window``: the
+      last day; a ratio or an average: its sides aggregated by their own
+      rules, then divided (:func:`window_value`, Σnumerator / Σdenominator
+      for a rate); ``derived``: the formula over its inputs' window values.
+      This is what a tool that aggregates a window the way the manifest
+      says compares with. NULL for ``count_distinct`` metrics (not
+      derivable from days) and anything computed from one, and for every
+      metric when ``aggregation`` is not given;
     - ``pre_onset_rms_diff`` / ``pre_onset_max_abs_diff``: the twin difference
       before ``start`` — realization noise, by construction;
     - ``pre_onset_days``: the days before ``start`` on which the difference is
@@ -327,7 +414,10 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
       return-rate anomaly is dated by order and shows up weeks later).
     """
     lo = pd.Timestamp(start)
+    aggregation = aggregation or {}
+    has_sides = {"null_numerator", "null_denominator"} <= set(effects.columns)
     rows: list[dict[str, Any]] = []
+    agg_values: dict[tuple, tuple[float, float]] = {}
     for (metric, dimension, value), g in effects.groupby(_KEYS, dropna=False, sort=False):
         dates = g["date"].to_numpy()
         null_v = g["null_value"].to_numpy(dtype=float)
@@ -356,6 +446,24 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
             rel_measured = _rel(_mean(world_v[span]), _mean(null_v[span]))
         pre_abs = np.abs(diff[pre & ~np.isnan(diff)])
         null_mean, world_mean = _mean(null_v[window]), _mean(world_v[window])
+        null_agg = world_agg = float("nan")
+        spec = aggregation.get(metric)
+        if spec is not None and spec.get("sides") is not None and has_sides:
+            null_agg = window_value(
+                g["null_numerator"].to_numpy(dtype=float)[window],
+                g["null_denominator"].to_numpy(dtype=float)[window],
+                spec["sides"],
+            )
+            world_agg = window_value(
+                g["world_numerator"].to_numpy(dtype=float)[window],
+                g["world_denominator"].to_numpy(dtype=float)[window],
+                spec["sides"],
+            )
+        elif spec is not None and spec.get("formula") is None:
+            null_agg = _rule_value(null_v[window], spec["rule"])
+            world_agg = _rule_value(world_v[window], spec["rule"])
+        key = (metric, None if pd.isna(dimension) else dimension, None if pd.isna(value) else value)
+        agg_values[key] = (null_agg, world_agg)
         mean_diff = _mean(diff[window])
         # The window test, on the declared window and on the window stretched
         # by its own length (an effect that lands late).
@@ -392,6 +500,9 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
                 "world_mean": world_mean,
                 "mean_diff": mean_diff,
                 "rel_change": _rel(world_mean, null_mean),
+                "null_aggregated": null_agg,
+                "world_aggregated": world_agg,
+                "rel_change_aggregated": _rel(world_agg, null_agg),
                 "pre_onset_rms_diff": pre_rms,
                 "pre_onset_max_abs_diff": float(pre_abs.max()) if pre_abs.size else 0.0,
                 "pre_onset_days": int(pre_abs.size),
@@ -408,11 +519,32 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
                 "rel_change_onset_to_offset": rel_measured,
             }
         )
+    # Derived metrics: the formula over the inputs' window values, same slice.
+    for row in rows:
+        spec = aggregation.get(row["metric"])
+        if spec is None or spec.get("formula") is None:
+            continue
+        both = []
+        for side in (0, 1):
+            inputs = {}
+            for name in _formula_metrics(spec["formula"]):
+                hit = agg_values.get((name, row["dimension"], row["value"]))
+                inputs[name] = float("nan") if hit is None else hit[side]
+            both.append(evaluate_formula(spec["formula"], inputs))
+        row["null_aggregated"], row["world_aggregated"] = both
+        row["rel_change_aggregated"] = _rel(both[1], both[0])
     return pd.DataFrame(rows)
+
+
+def _formula_metrics(node: dict) -> list[str]:
+    if "metric" in node:
+        return [node["metric"]]
+    return [m for a in node.get("args", []) for m in _formula_metrics(a)]
 
 
 _STAT_FIELDS = [
     "rel_change",
+    "rel_change_aggregated",
     "mean_diff",
     "null_mean",
     "pre_onset_rms_diff",
@@ -621,6 +753,10 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
       ``rel_change_sem`` (sd / sqrt(n)): the mean is the best estimate of the
       expected effect, the spread is how far one seed can be from it;
     - ``mean_diff_mean`` / ``mean_diff_sd``: the same in the metric's units;
+    - ``rel_change_aggregated_mean`` / ``_sd`` / ``_sem`` / ``_min`` /
+      ``_max`` and ``t_across_seeds_aggregated``: the same for
+      ``rel_change_aggregated`` (ratios and averages only; NULL otherwise).
+      The verdicts test ``rel_change``, the window mean of daily values;
     - ``verdict``: :func:`set_verdict` at two-sided 1% — ``established_up``,
       ``established_down``, ``open``, ``exactly_zero`` or ``undefined``. This
       is the set's answer to "did this anomaly move this metric", and the one
@@ -664,6 +800,9 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
     df["offset_lag"] = (pd.to_datetime(df["offset"]) - start).dt.days
     df["rel_change"] = df["rel_change"].astype(float)
     df["z_window"] = df["z_window"].astype(float)
+    if "rel_change_aggregated" not in df:
+        df["rel_change_aggregated"] = np.nan
+    df["rel_change_aggregated"] = df["rel_change_aggregated"].astype(float)
     if "pre_onset_days" not in df:  # summaries written before the field existed
         df["pre_onset_days"] = np.nan
     if "pre_onset_max_abs_diff" not in df:
@@ -677,6 +816,10 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
         rel_change_sd=("rel_change", "std"),
         rel_change_min=("rel_change", "min"),
         rel_change_max=("rel_change", "max"),
+        rel_change_aggregated_mean=("rel_change_aggregated", "mean"),
+        rel_change_aggregated_sd=("rel_change_aggregated", "std"),
+        rel_change_aggregated_min=("rel_change_aggregated", "min"),
+        rel_change_aggregated_max=("rel_change_aggregated", "max"),
         mean_diff_mean=("mean_diff", "mean"),
         mean_diff_sd=("mean_diff", "std"),
         null_mean=("null_mean", "mean"),
@@ -705,8 +848,12 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
             flags.append(None)
     out["aligned_before_start"] = pd.array(flags, dtype="boolean")
     out["rel_change_sem"] = out["rel_change_sd"] / np.sqrt(out["n_seeds"])
+    out["rel_change_aggregated_sem"] = out["rel_change_aggregated_sd"] / np.sqrt(out["n_seeds"])
     with np.errstate(divide="ignore", invalid="ignore"):
         out["t_across_seeds"] = out["rel_change_mean"] / out["rel_change_sem"]
+        out["t_across_seeds_aggregated"] = (
+            out["rel_change_aggregated_mean"] / out["rel_change_aggregated_sem"]
+        )
     rows = list(
         zip(out["rel_change_mean"], out["rel_change_sd"], out["n_seeds"], out["differs_share"])
     )

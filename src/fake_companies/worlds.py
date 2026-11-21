@@ -467,10 +467,12 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
     group_dir.mkdir(parents=True, exist_ok=True)
 
     layer = fills = None
+    aggregation: dict[str, dict[str, Any]] = {}
     singles_dims: list[tuple[str, ...]] = []
     if job["effects"] or job["series"]:
         layer = SemanticLayer.for_vertical(get_vertical(cfg.company.vertical), job["dbt_root"])
         fills = {name: layer.fill_value(name) for name in layer.metrics}
+        aggregation = aggregation_spec(layer, get_vertical(cfg.company.vertical).stock_metrics())
         if job["series"]:
             singles_dims = layer.single_dimension_sets()
 
@@ -525,7 +527,7 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
                     return frame[frame["dimension"].isna() | frame["dimension"].isin(labels)]
 
                 effects = twin_effects(measured(null_series), measured(series), fills)
-                summary = summarize_twin(effects, record.start, record.end)
+                summary = summarize_twin(effects, record.start, record.end, aggregation)
                 summary_rel = (rel_dir / f"{plan.stem}.effects_summary.parquet").as_posix()
                 _write_twin_summary(summary, out_dir / summary_rel)
                 fields = ground_truth_fields(
@@ -574,6 +576,31 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
             ).model_dump(mode="json")
         )
     return out
+
+
+def aggregation_spec(layer, stocks: frozenset[str]) -> dict[str, dict[str, Any]]:
+    """How each metric aggregates over a window, for
+    :func:`fake_companies.effects.summarize_twin`: ``{"rule": its
+    time_aggregation, "sides": (numerator rule, denominator rule) for a
+    ratio or an average else None, "formula": the derived tree else None}``.
+    A ratio aggregates each side by its input metric's own rule; an average
+    sums its sum and its row count."""
+    spec: dict[str, dict[str, Any]] = {}
+    for name, metric in layer.metrics.items():
+        sides = None
+        if metric.kind == "ratio":
+            sides = (
+                layer.time_aggregation(metric.inputs["num"], stocks),
+                layer.time_aggregation(metric.inputs["den"], stocks),
+            )
+        elif layer.has_sides(name):
+            sides = ("sum", "sum")
+        spec[name] = {
+            "rule": layer.time_aggregation(name, stocks),
+            "sides": sides,
+            "formula": layer.formula(name) if metric.kind == "derived" else None,
+        }
+    return spec
 
 
 def _raw_connection(result):
