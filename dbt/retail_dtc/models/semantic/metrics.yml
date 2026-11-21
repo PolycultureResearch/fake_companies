@@ -164,6 +164,27 @@ metrics:
       numerator: gross_revenue
       denominator: orders
 
+  - name: item_revenue
+    description: Merchandise revenue summed over order lines, before discounts.
+      Equal to gross_revenue (an order's gross amount is the sum of its lines),
+      but on the order-line model, so it can be cut by category.
+    type: simple
+    label: Item Revenue
+    type_params:
+      measure:
+        name: line_revenue
+        fill_nulls_with: 0
+
+  - name: avg_unit_price
+    description: Merchandise revenue per unit sold (item revenue / units). Cut
+      by category, a change splits into a category's own price moving and
+      units moving between cheaper and dearer categories (the mix).
+    type: ratio
+    label: Avg Unit Price
+    type_params:
+      numerator: item_revenue
+      denominator: units
+
   - name: gross_margin
     description: Merchandise margin (line revenue - unit cost), before discounts.
     type: simple

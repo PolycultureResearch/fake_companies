@@ -114,7 +114,10 @@ def _sample_surprise(
     sc = cfg.anomalies.surprise
     assert sc is not None
     gen = rng.stream("anomalies.surprise")
-    drivers = sorted(vertical.known_drivers(cfg))
+    # Drivers added after a vertical's surprise pool was fixed stay out of it,
+    # so adding one leaves every existing config's surprises as they were.
+    pool = getattr(vertical, "surprise_drivers", None)
+    drivers = sorted(pool(cfg) if pool is not None else vertical.known_drivers(cfg))
     dq_tables = vertical.dq_surprise_tables()
     dq_meta = vertical.dq_targets()
     taken = [cal.date_to_index(r.spec.window.start) for r in existing]
