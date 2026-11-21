@@ -50,6 +50,23 @@ def retail_set(tmp_path_factory) -> tuple[Path, WorldSetManifest]:
     return out, manifest
 
 
+def test_old_and_new_manifests_are_refused_up_front(retail_set, tmp_path):
+    from fake_companies.worlds import SCHEMA_VERSION, UnsupportedWorldSet
+
+    out, _ = retail_set
+    assert load_world_set(out, min_version=2).schema_version == SCHEMA_VERSION == 2
+    data = json.loads((out / MANIFEST_NAME).read_text())
+    for version in (1, 3):  # older than asked for; newer than this library
+        path = tmp_path / f"v{version}.json"
+        path.write_text(json.dumps({**data, "schema_version": version}))
+        with pytest.raises(UnsupportedWorldSet, match=f"schema_version {version}"):
+            load_world_set(path, min_version=2)
+    # a version 1 manifest still reads when the reader does not ask for 2
+    v1 = {**data, "schema_version": 1, "verdicts": []}
+    (tmp_path / "v1ok.json").write_text(json.dumps(v1))
+    assert load_world_set(tmp_path / "v1ok.json").schema_version == 1
+
+
 def test_parse_seeds():
     assert parse_seeds("0-3") == [0, 1, 2, 3]
     assert parse_seeds("7") == [7]
@@ -76,7 +93,7 @@ def test_manifest_is_the_contract(retail_set):
     out, manifest = retail_set
     loaded = load_world_set(out)
     assert loaded == manifest == load_world_set(out / MANIFEST_NAME)
-    assert loaded.schema_version == 1
+    assert loaded.schema_version == 2
     assert loaded.vertical == "retail_dtc" and loaded.format == "parquet"
     assert loaded.config_sha256 == hashlib.sha256(RETAIL.read_bytes()).hexdigest()
     assert loaded.seeds == [0, 1, 2] and loaded.regimes == ["baseline"]

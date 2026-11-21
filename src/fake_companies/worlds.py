@@ -52,7 +52,21 @@ from .config import load_config
 from .config.overrides import BASELINE_REGIME, regime_overrides
 from .output.manifest import TOOL_VERSION
 
-SCHEMA_VERSION = 1
+# What each manifest version guarantees (eval-worlds spec 10.4). A reader that
+# needs a field refuses a set below the version that introduced it, up front:
+# ``load_world_set(path, min_version=2)``.
+#
+# 1  phase 1, through 2026-11-19: worlds, ground truth with measured effects,
+#    effects tables, series files, the set summary with ``verdict``. Sets built
+#    from 83640ca to b51d70e also say 1 but carry some of version 2's fields;
+#    no field says which ``moved`` rule built them, so treat every 1 as old.
+# 2  2026-11-20: the ``moved`` rule of b51d70e; manifest ``metrics[]``
+#    aggregation fields (measure_agg, input_time_aggregation, formula,
+#    has_sides); per-twin ``effects_summary``; ``verdicts`` with
+#    ``verdict_10pct`` and ``seeds_to_establish[_10pct]``; ``weekly_series``
+#    and ``metrics[].has_weekly_series``; retail ``discounted_orders`` and
+#    ``customer_base``, wholesale ``trade_inventory_build``.
+SCHEMA_VERSION = 2
 MANIFEST_NAME = "worlds.json"
 WorldKind = Literal["null", "single", "story"]
 WorldFormat = Literal["duckdb", "parquet"]
@@ -210,12 +224,37 @@ class WorldSetManifest(BaseModel):
         return [(w, self.world(w.twin_of)) for w in self.worlds if w.twin_of is not None]
 
 
-def load_world_set(path: str | Path) -> WorldSetManifest:
-    """Read and validate a world set's manifest (a directory or the file)."""
+class UnsupportedWorldSet(ValueError):
+    """A world set's manifest is older than the reader needs, or newer than
+    this library understands."""
+
+
+def load_world_set(path: str | Path, min_version: int | None = None) -> WorldSetManifest:
+    """Read and validate a world set's manifest (a directory or the file).
+
+    ``min_version`` refuses a set built under an older contract (see
+    :data:`SCHEMA_VERSION`) before anything else is read. A set newer than
+    this library is always refused: its fields would not validate, and the
+    version says why.
+    """
     path = Path(path)
     if path.is_dir():
         path = path / MANIFEST_NAME
-    return WorldSetManifest.model_validate_json(path.read_text())
+    text = path.read_text()
+    version = json.loads(text).get("schema_version")
+    if not isinstance(version, int):
+        raise UnsupportedWorldSet(f"{path}: schema_version is {version!r}, not an integer")
+    if version > SCHEMA_VERSION:
+        raise UnsupportedWorldSet(
+            f"{path}: schema_version {version} is newer than this library's "
+            f"{SCHEMA_VERSION}; upgrade fake_companies to read it"
+        )
+    if min_version is not None and version < min_version:
+        raise UnsupportedWorldSet(
+            f"{path}: schema_version {version} is older than the {min_version} this reader "
+            "needs; rebuild the set with a current fake_companies"
+        )
+    return WorldSetManifest.model_validate_json(text)
 
 
 # --------------------------------------------------------------------------- #

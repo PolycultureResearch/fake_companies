@@ -241,6 +241,11 @@ for single, null in ws.twins():                # (single world, its null twin)
 summary = pd.read_parquet(f"{root}/{ws.effects_summary}")
 ```
 
+`worlds.json` → `schema_version` says which contract built the set (2 since
+2026-11-20; the spec's §10.4 lists what each version holds). Ask for the one
+you need and an older set is refused before anything is read:
+`load_world_set(root, min_version=2)` raises `UnsupportedWorldSet`.
+
 World ids are `<slug>.<regime>.s<seed>.<null | only.<anomaly> | story>`. The
 same config, seed, regime and anomaly always give the same id and the same
 bytes, whichever other worlds are in the set.

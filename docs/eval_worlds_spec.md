@@ -1,6 +1,6 @@
 # Spec: world sets for evaluation
 
-**Status:** phase 1 built, 2026-11-19 (see §8 for what changed on the way). Phase 2 not started.
+**Status:** phase 1 built, 2026-11-19 (see §8 for what changed on the way). Phase 2 not started, except the pieces of item 6 that §10 pulled forward (2026-11-20, manifest `schema_version` 2).
 
 ## 1. Purpose
 
@@ -113,7 +113,7 @@ not depend on the number of jobs.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generator_version": "…",
   "config": "configs/alpenglow_retail_dtc.yaml",
   "config_sha256": "…",
@@ -1043,6 +1043,28 @@ shipments do, but the declared map was left alone: adding them changes
 which is Devon's call, as it was for §8's corrections. Their measured effects
 (`metrics_moved`, the verdicts) are there regardless. `discounted_orders`
 moves only while a promotion runs, so no driver declares it.
+
+### 10.4 `schema_version` 2
+
+`worlds.json` → `schema_version` was 1 from the first build, while the
+contract changed under it twice (`83640ca`, `b51d70e`). It is now **2**, and
+`fake_companies.worlds.SCHEMA_VERSION` documents what each value guarantees:
+
+| Version | Built | What a reader may rely on |
+|---|---|---|
+| 1 | until 2026-11-19 | Worlds and twins; ground truth with `measured_effects`; `*.effects.parquet`; `*.series.parquet`; `effects_summary.parquet` with `verdict`. Sets built between `83640ca` and `b51d70e` also say 1 and carry part of version 2, and nothing in them says which `moved` rule produced them, so treat every version 1 set as old. |
+| 2 | from 2026-11-20 | Everything in 1, plus: the `moved` rule of `b51d70e` (§8); `metrics[]` `measure_agg`, `input_time_aggregation`, `formula`, `has_sides`; per-twin `*.effects_summary.parquet` and slice rows in the effects tables; `verdicts`, `verdict_10pct`, `seeds_to_establish`, `seeds_to_establish_10pct` (§10.1); `worlds[].weekly_series` and `metrics[].has_weekly_series` (§10.2); retail `discounted_orders` and `customer_base`, wholesale `trade_inventory_build` (§10.3). |
+
+A reader refuses an old set before reading anything else:
+`load_world_set(path, min_version=2)` raises `UnsupportedWorldSet` naming
+the version found and the version needed. A set newer than the installed
+library is always refused the same way, rather than failing on an unknown
+field. A reader that does not use `fake_companies` checks `schema_version`
+itself.
+
+The ten-seed sets of §9 (`out/worlds/*10`) are version 1. They were built
+under the current `moved` rule (§9) but have none of §10's additions; rebuild
+them to use those.
 
 ---
 
