@@ -29,4 +29,4 @@ def build_all(
     from .pipeline import build_pipeline
 
     deals = build_pipeline(cfg, cal, rng, panel, frames)
-    build_billing(cfg, cal, rng, deals, frames)
+    build_billing(cfg, cal, rng, deals, frames, panel)

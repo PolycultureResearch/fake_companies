@@ -44,6 +44,11 @@ class B2BServicesVertical:
 
         return known_drivers(cfg)
 
+    def surprise_drivers(self, cfg: BaseScenarioConfig) -> set[str]:
+        from .drivers import surprise_drivers
+
+        return surprise_drivers(cfg)
+
     def build_drivers(self, cfg: BaseScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPanel:
         from .drivers import build_drivers
 

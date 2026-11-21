@@ -67,6 +67,9 @@ _DRIVER_METRICS: list[tuple[str, list[str]]] = [
             "invoiced_revenue",
         ],
     ),
+    # A delivery slowdown pushes balance invoices (issued at delivery) later:
+    # invoicing and the cash behind it dip with bookings untouched.
+    ("delivery_time_scale", ["invoiced_revenue", "collected_cash"]),
 ]
 
 
@@ -85,6 +88,7 @@ _ROOTS: list[RootRule] = [
     ("stage_conversion.", "deals_won", None, _STAGE_SEGMENT),
     ("deal_size", "avg_deal_size", None, {}),
     ("cycle_time_scale", "sales_cycle_days", None, {}),
+    ("delivery_time_scale", "invoiced_revenue", None, {}),
 ]
 
 

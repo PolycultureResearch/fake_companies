@@ -26,6 +26,7 @@ def build_billing(
     rng: RngHub,
     deals: pd.DataFrame,
     frames: dict[str, pd.DataFrame],
+    panel=None,
 ) -> None:
     gen = rng.stream("b2b_billing")
     cc = cfg.contracts
@@ -35,9 +36,16 @@ def build_billing(
     n = len(won)
 
     signed_at = pd.to_datetime(won["closed_at"]).to_numpy()
-    delivery_s = (
-        lognormal_around(gen, cc.delivery_days_mean, cc.delivery_sigma, n) * 86400
-    ).astype("int64")
+    delivery_days = lognormal_around(gen, cc.delivery_days_mean, cc.delivery_sigma, n)
+    if panel is not None:
+        # Delivery slows for contracts signed while the scale is up (exactly
+        # 1.0 otherwise, which leaves every value as it was).
+        signed_day = ((signed_at - np.datetime64(cal.start, "s")) // np.timedelta64(1, "D")).astype(
+            np.int64
+        )
+        signed_day = np.clip(signed_day, 0, cal.n_days - 1)
+        delivery_days = delivery_days * panel.get("delivery_time_scale")[signed_day]
+    delivery_s = (delivery_days * 86400).astype("int64")
     delivery_at = signed_at + delivery_s.astype("timedelta64[s]")
     delivered = delivery_at <= cutoff
 

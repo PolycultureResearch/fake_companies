@@ -26,7 +26,23 @@ def known_drivers(cfg: ScenarioConfig) -> set[str]:
     names.update(f"stage_conversion.{s.name}" for s in cfg.pipeline.stages)
     names.add("deal_size")
     names.add("cycle_time_scale")
-    return names
+    return names | late_drivers(cfg)
+
+
+def late_drivers(cfg: ScenarioConfig) -> set[str]:
+    """Drivers added after the surprise pool was fixed, kept out of it so every
+    existing config's surprises stay as they were.
+
+    ``delivery_time_scale``: a multiplier on the days from signing to
+    delivery for contracts signed that day, 1.0 unless an anomaly moves it.
+    Above 1 the delivery team is behind: balance invoices, which are issued
+    at delivery, arrive later while bookings do not move.
+    """
+    return {"delivery_time_scale"}
+
+
+def surprise_drivers(cfg: ScenarioConfig) -> set[str]:
+    return known_drivers(cfg) - late_drivers(cfg)
 
 
 def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPanel:
@@ -51,5 +67,8 @@ def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPane
     # --- scale drivers (mean ~1 multipliers) --------------------------------- #
     panel.set("deal_size", noise("deal_size", 0.8))
     panel.set("cycle_time_scale", noise("cycle_time_scale", 0.8))
+    # Exactly 1.0 unless an anomaly moves it: no noise and no stream, so every
+    # draw and byte is as before.
+    panel.set("delivery_time_scale", np.ones(n))
 
     return panel

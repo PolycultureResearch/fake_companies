@@ -40,4 +40,6 @@ def build_all(
 
     scan, pos_units, starts = build_scan_sales(cfg, cal, rng, panel, products)
     frames["pos.scan_sales"] = scan
-    frames["erp.shipments"] = build_shipments(cfg, cal, rng, products, accounts, pos_units, starts)
+    frames["erp.shipments"] = build_shipments(
+        cfg, cal, rng, products, accounts, panel, pos_units, starts
+    )

@@ -59,6 +59,14 @@ def promo_grids(
     return lift, disc
 
 
+def price_grid(
+    cfg: ScenarioConfig, panel: DriverPanel, starts: np.ndarray, categories: list[str]
+) -> np.ndarray:
+    """Weekly list-price index per category (weeks, categories); 1.0 unless a
+    ``price.<category>`` anomaly moves it."""
+    return np.stack([weekly_mean(panel.get(f"price.{cat}"), starts) for cat in categories], axis=1)
+
+
 def demand_grid(
     cfg: ScenarioConfig,
     panel: DriverPanel,
@@ -109,6 +117,8 @@ def build_scan_sales(
 
     demand = demand_grid(cfg, panel, starts, banners, categories)  # (W, B, C)
     lift, disc = promo_grids(cfg, cal, starts, banners, categories)  # (W, B, C)
+    price = price_grid(cfg, panel, starts, categories)  # (W, C)
+    elasticity = np.array([cfg.catalog.categories[c].price_elasticity for c in categories])
 
     cat_of_p = products.product_cat_idx
     mean = (
@@ -117,10 +127,14 @@ def build_scan_sales(
         * products.weights[None, None, :]
         * demand[:, :, cat_of_p]
         * lift[:, :, cat_of_p]
+        * (price ** -elasticity[None, :])[:, None, cat_of_p]
     )
     units = gen.poisson(mean)  # (W, B, P)
 
-    shelf_price = products.msrps[None, None, :] * (1.0 - disc[:, :, cat_of_p])
+    # The retailer passes a list-price change through to the shelf.
+    shelf_price = (
+        products.msrps[None, None, :] * price[:, None, cat_of_p] * (1.0 - disc[:, :, cat_of_p])
+    )
     dollars = np.round(units * shelf_price, 2)
 
     w_ix, b_ix, p_ix = np.nonzero(units)

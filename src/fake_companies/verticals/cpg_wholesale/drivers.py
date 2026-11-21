@@ -23,7 +23,27 @@ def known_drivers(cfg: ScenarioConfig) -> set[str]:
     names = {f"spend.{ch}" for ch in cfg.marketing.channels}
     names.update(f"consumer_demand.{cat}" for cat in cfg.catalog.categories)
     names.update(f"velocity.{banner}" for banner in cfg.market.retailers)
+    return names | late_drivers(cfg)
+
+
+def late_drivers(cfg: ScenarioConfig) -> set[str]:
+    """Drivers added after the surprise pool was fixed, kept out of it so every
+    existing config's surprises stay as they were:
+
+    - ``price.<category>``: a list-price index (case price and shelf price
+      both), 1.0 unless an anomaly moves it; POS answers it through the
+      category's price elasticity.
+    - ``ordering.<channel_type>``: how much of last week's sell-through the
+      accounts of a channel reorder, 1.0 unless an anomaly moves it. Below 1
+      a retailer is running its stock down (a destock); above 1, building it.
+    """
+    names = {f"price.{cat}" for cat in cfg.catalog.categories}
+    names.update(f"ordering.{r.channel_type}" for r in cfg.market.retailers.values())
     return names
+
+
+def surprise_drivers(cfg: ScenarioConfig) -> set[str]:
+    return known_drivers(cfg) - late_drivers(cfg)
 
 
 def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPanel:
@@ -47,5 +67,10 @@ def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPane
     # --- per-banner shelf velocity (mean ~1 multiplier) ---------------------- #
     for banner in cfg.market.retailers:
         panel.set(f"velocity.{banner}", noise(f"velocity.{banner}", 0.7))
+
+    # --- list prices and reorder behaviour: exactly 1.0 unless an anomaly
+    # moves them. No noise and no stream, so every draw and byte is as before. #
+    for name in sorted(late_drivers(cfg)):
+        panel.set(name, np.ones(n))
 
     return panel
