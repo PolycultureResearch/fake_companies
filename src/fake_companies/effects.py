@@ -311,6 +311,9 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
       when the null mean is zero or undefined);
     - ``pre_onset_rms_diff`` / ``pre_onset_max_abs_diff``: the twin difference
       before ``start`` — realization noise, by construction;
+    - ``pre_onset_days``: the days before ``start`` on which the difference is
+      defined (both twins have a value). With ``pre_onset_max_abs_diff`` zero
+      and this above zero, the twins were identical until the anomaly;
     - ``noise_floor``: ``NOISE_K`` x the noise sigma;
     - ``first_diff``: the first day on or after ``start`` on which the twins
       differ at all. When ``pre_onset_rms_diff`` is zero the streams were
@@ -391,6 +394,7 @@ def summarize_twin(effects: pd.DataFrame, start: dt.date, end: dt.date | None) -
                 "rel_change": _rel(world_mean, null_mean),
                 "pre_onset_rms_diff": pre_rms,
                 "pre_onset_max_abs_diff": float(pre_abs.max()) if pre_abs.size else 0.0,
+                "pre_onset_days": int(pre_abs.size),
                 "noise_floor": float(floor),
                 "first_diff": first_diff,
                 "onset": onset,
@@ -637,6 +641,16 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
       freedom, so with three seeds only values beyond about 4.3 mean much
       (NULL with one seed);
     - ``noise_floor_mean`` and ``pre_onset_rms_diff_mean``: the typical noise;
+    - ``aligned_before_start``: true when in every seed the twins were
+      identical on every day before the anomaly's declared start (the
+      difference is defined on at least one such day and is zero on all of
+      them); false when any seed's twins differed; NULL otherwise (some seed
+      has no day before the start to judge by, e.g. a slice that first
+      occurs after it). ``aligned_before_start_share`` is the share of the
+      judged seeds that were aligned. Where it is true, ``first_diff`` is the exact
+      day the effect arrives and one twin's difference has no realization
+      noise before the anomaly (it can still have some after: the anomaly
+      re-deals the entities it touches);
     - ``first_diff_median_lag_days`` / ``onset_median_lag_days`` /
       ``offset_median_lag_days``: median days from the anomaly's declared
       start to the first differing day, the measured onset and the offset.
@@ -650,6 +664,12 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
     df["offset_lag"] = (pd.to_datetime(df["offset"]) - start).dt.days
     df["rel_change"] = df["rel_change"].astype(float)
     df["z_window"] = df["z_window"].astype(float)
+    if "pre_onset_days" not in df:  # summaries written before the field existed
+        df["pre_onset_days"] = np.nan
+    if "pre_onset_max_abs_diff" not in df:
+        df["pre_onset_max_abs_diff"] = df["pre_onset_rms_diff"]
+    judged = df["pre_onset_days"].fillna(0) > 0
+    df["_aligned"] = (judged & (df["pre_onset_max_abs_diff"] == 0)).astype(float).where(judged)
     g = df.groupby(SUMMARY_KEYS, dropna=False, sort=True)
     out = g.agg(
         n_seeds=("seed", "nunique"),
@@ -668,7 +688,22 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
         first_diff_median_lag_days=("first_diff_lag", "median"),
         onset_median_lag_days=("onset_lag", "median"),
         offset_median_lag_days=("offset_lag", "median"),
+        aligned_before_start_share=("_aligned", "mean"),
+        _judged=("_aligned", "count"),
     ).reset_index()
+    # False as soon as one seed's twins differed; True only when every seed
+    # was judged and aligned; NULL when some seed could not be judged.
+    flags = []
+    for share, judged, n in zip(
+        out["aligned_before_start_share"], out.pop("_judged"), out["n_seeds"]
+    ):
+        if pd.notna(share) and share < 1.0:
+            flags.append(False)
+        elif pd.notna(share) and judged == n:
+            flags.append(True)
+        else:
+            flags.append(None)
+    out["aligned_before_start"] = pd.array(flags, dtype="boolean")
     out["rel_change_sem"] = out["rel_change_sd"] / np.sqrt(out["n_seeds"])
     with np.errstate(divide="ignore", invalid="ignore"):
         out["t_across_seeds"] = out["rel_change_mean"] / out["rel_change_sem"]

@@ -750,12 +750,29 @@ for how many of the metrics an anomaly touches (verdict not exactly zero)
 were the twins already different *before* the anomaly started? That is
 layer 1 below, directly observed.
 
-| Set | Anomalies whose twins differ before the start | Anomalies aligned until the start |
-|---|---|---|
-| Bristlecone | none | all |
-| Meridian | `outbound_team_turnover` (15 of 15 metrics) | the other three (at most 1 metric each) |
-| Alpenglow | `mobile_checkout_bug` (16 of 20), `paid_social_budget_cut` (21 of 22) | `jackets_sizing_recall`, `tees_demand_slump` |
-| White Cube | every rate anomaly (29 to 37 of 32 to 38 metrics) | none |
+The unit is the metric total, not the anomaly. Corrected 2026-11-20: the
+first version of this table had an "anomalies aligned until the start"
+column that read "none" for White Cube, which was true only in the sense
+that no White Cube anomaly has *every* metric aligned. The metrics nearest
+each root are aligned, and Breakdown's runner rightly found
+`marketing_spend` and `visit_signup_rate` aligned on the smoke set.
+
+| Set | Anomaly | Metric totals that differ before the start | Metric totals aligned until the start |
+|---|---|---|---|
+| Bristlecone | all four | none | all |
+| Meridian | `outbound_team_turnover` | 15 of 15 | none |
+| | `healthcare_proposal_stall`, `legal_backlog`, `discounting_creep` | at most 1 | the rest, including every pipeline stage and bookings |
+| Alpenglow | `mobile_checkout_bug` | 16 of 20 | `conversion_rate`, `converting_sessions`, `new_customers`, `session_orders` |
+| | `paid_social_budget_cut` | 21 of 22 | `marketing_spend` |
+| | `jackets_sizing_recall`, `tees_demand_slump` | none | all |
+| White Cube | `latam_campaign_spend_ramp` | 37 of 38 | `marketing_spend` |
+| | the three Brazil lifts, `mobile_signup_cta_regression` | 33 of 36 | `signup_sessions`, `signups`, `visit_signup_rate` |
+| | `professional_churn_spike` | 29 of 32 | `direct_conversions`, `trial_conversions`, `trial_conversion_rate` |
+| | `onboarding_revamp` | 32 of 32 | none |
+
+Slices can differ from their totals (a root slice is often aligned when its
+total is not). The set's `effects_summary.parquet` now says so for every
+(anomaly, metric, slice): `aligned_before_start` (§10.5).
 
 These are the same anomalies whose downstream metrics are noisy in §9.3, and
 the same ones where `moved` now takes its standard error from the
@@ -880,10 +897,12 @@ moved by one or two seeds either way. Bristlecone did not change.
   20% or better; those are the root of every anomaly and the top-of-tree
   cases in the previous bullet. Score the others on direction and
   localization only. Do not score a size against one twin's difference where
-  the twins diverge before the anomaly (§9.5 table): that difference carries
-  realization noise as large as the effect. Where they are aligned
-  (Bristlecone, Meridian except the lead cut, Alpenglow returns and category
-  demand), one twin's difference is that world's own effect, exact in
+  the twins diverge before the anomaly (§9.5 table, per metric; the set's
+  `aligned_before_start` says it per metric and slice): that difference
+  carries realization noise as large as the effect. Where they are aligned
+  (all of Bristlecone; Meridian except the lead cut; Alpenglow returns and
+  category demand; and the metrics nearest the root elsewhere, listed in the
+  §9.5 table), one twin's difference is that world's own effect, exact in
   Bristlecone and within the per-twin noise of §9.3 elsewhere (layer 2 still
   re-deals entities after the start), and can be scored per world when that
   noise is small next to the effect. The rebuild under the current `moved`
@@ -1067,6 +1086,40 @@ itself.
 The ten-seed sets of §9 (`out/worlds/*10`) are version 1. They were built
 under the current `moved` rule (§9) but have none of §10's additions; rebuild
 them to use those.
+
+### 10.5 Twins aligned before the start, per metric and slice
+
+**A contradiction the runner found, resolved.** On the smoke set White Cube's
+root metrics `marketing_spend` and `visit_signup_rate` have
+`pre_onset_rms_diff` 0, while §9.5 said no White Cube anomaly was aligned.
+The data were right and the spec's wording was wrong: §9.5 counted metric
+totals per anomaly, and "no anomaly aligned" meant only that none has *every*
+metric aligned. The metrics nearest each root are aligned (the spend ramp's
+`marketing_spend`; the lifts' and the CTA regression's `signup_sessions`,
+`signups` and `visit_signup_rate`). §9.5's table now lists them per metric,
+and §9.7 points to it. No code was wrong.
+
+**A set-level flag, so the runner need not read every twin.** The set's
+`effects_summary.parquet` gains, per (regime, anomaly, metric, dimension,
+value):
+
+- `aligned_before_start` (boolean): true when in every seed the twins were
+  identical on every day before the anomaly's declared start; false when any
+  seed's twins differed there; NULL when some seed has no day before the
+  start to judge by (a slice value that first occurs later, an anomaly on
+  the first day).
+- `aligned_before_start_share`: the share of the judged seeds that were
+  aligned.
+
+Each twin's `*.effects_summary.parquet` gains `pre_onset_days`, the days
+before the start on which the difference is defined; "judged" means it is
+above zero. Where the flag is true, `first_diff` is exact and a twin's
+difference carries no realization noise from before the anomaly.
+
+"Before the start" and not "before onset": `onset` is when the difference
+clears the noise floor, weeks after the start for a ramp. The field names in
+the per-twin summary say `pre_onset` for historical reasons; they mean
+before the declared start.
 
 ---
 

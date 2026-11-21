@@ -67,6 +67,31 @@ def test_old_and_new_manifests_are_refused_up_front(retail_set, tmp_path):
     assert load_world_set(tmp_path / "v1ok.json").schema_version == 1
 
 
+def test_set_summary_says_where_twins_were_aligned(retail_set):
+    """One flag per (anomaly, metric, slice) instead of every twin's summary."""
+    out, manifest = retail_set
+    summary = pd.read_parquet(out / manifest.effects_summary)
+    keys = ["anomaly", "metric", "dimension", "value"]
+    twins = []
+    for single, _ in manifest.twins():
+        t = pd.read_parquet(out / single.effects_summary)
+        t["anomaly"] = json.loads((out / single.ground_truth).read_text())[0]["id"]
+        twins.append(t)
+    per_twin = pd.concat(twins)
+    judged = per_twin["pre_onset_days"] > 0
+    per_twin["differed"] = judged & (per_twin["pre_onset_max_abs_diff"] != 0)
+    per_twin["aligned"] = judged & ~per_twin["differed"]
+    for frame in (per_twin, summary):
+        frame[["dimension", "value"]] = frame[["dimension", "value"]].fillna("")
+    g = per_twin.groupby(keys)
+    expect = pd.DataFrame({"any_differed": g["differed"].any(), "all_aligned": g["aligned"].all()})
+    got = summary.set_index(keys)["aligned_before_start"].reindex(expect.index)
+    assert (got[expect["any_differed"]] == False).all()
+    assert (got[expect["all_aligned"]] == True).all()
+    assert got[~expect["any_differed"] & ~expect["all_aligned"]].isna().all()
+    assert (got == True).any() and (got == False).any()
+
+
 def test_parse_seeds():
     assert parse_seeds("0-3") == [0, 1, 2, 3]
     assert parse_seeds("7") == [7]

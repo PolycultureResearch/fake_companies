@@ -307,6 +307,10 @@ A small set (three seeds) can rarely reach the 1% bar (|t| ≥ 9.9), so the same
 file also has `verdict_10pct`, the same test at two-sided 10% (|t| ≥ 2.9 at
 three seeds), which establishes about one in ten effects that do not exist:
 use it only when the strict one cannot answer, and say so.
+`aligned_before_start` says, per anomaly, metric and slice, whether every
+seed's twins were identical before the anomaly's start (then one twin's
+difference is clean before it and `first_diff` is exact);
+`aligned_before_start_share` is the share of seeds that were.
 `seeds_to_establish` / `seeds_to_establish_10pct` project how many seeds each
 row would need at each level. `worlds.json` → `verdicts` lists every verdict
 column with its `level`, `t_critical` at this set's seed count and `min_seeds`.

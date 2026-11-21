@@ -239,6 +239,51 @@ def test_cross_seed_summary():
     assert out["verdict_10pct"] == "established_down"
     assert out["seeds_to_establish"] == 3 and out["seeds_to_establish_10pct"] == 2
     assert out["onset_median_lag_days"] == 1
+    # these rows do not say how many days before the start were judged
+    assert pd.isna(out["aligned_before_start"]) and pd.isna(out["aligned_before_start_share"])
+
+
+def test_aligned_before_start_across_seeds():
+    base = {
+        "regime": "baseline",
+        "anomaly": "a",
+        "start": START,
+        "dimension": None,
+        "value": None,
+        "null_mean": 100.0,
+        "mean_diff": -5.0,
+        "rel_change": -0.05,
+        "noise_floor": 0.0,
+        "first_diff": START,
+        "onset": START,
+        "offset": END,
+        "days_over_floor": 5,
+        "differs": True,
+        "z_window": -9.0,
+        "moved": True,
+    }
+    rows = []
+    for seed in range(3):
+        for metric, pre_abs, pre_days in (
+            ("aligned", 0.0, 30),
+            ("one_seed_differs", 2.0 if seed == 1 else 0.0, 30),
+            ("starts_on_day_one", 0.0, 0),
+        ):
+            rows.append(
+                {
+                    **base,
+                    "seed": seed,
+                    "metric": metric,
+                    "pre_onset_rms_diff": pre_abs / 2,
+                    "pre_onset_max_abs_diff": pre_abs,
+                    "pre_onset_days": pre_days,
+                }
+            )
+    out = summarize_across_seeds(pd.DataFrame(rows)).set_index("metric")
+    assert out.loc["aligned", "aligned_before_start"] == True
+    assert out.loc["one_seed_differs", "aligned_before_start"] == False
+    assert out.loc["one_seed_differs", "aligned_before_start_share"] == pytest.approx(2 / 3)
+    assert pd.isna(out.loc["starts_on_day_one", "aligned_before_start"])
 
 
 def test_set_verdict():
