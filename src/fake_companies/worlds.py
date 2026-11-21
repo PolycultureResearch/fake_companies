@@ -144,6 +144,13 @@ class MetricInfo(BaseModel):
     # differ by design: use time_aggregation for the business number and
     # metricflow_week to reproduce mf query; never assume they agree.
     matches_metricflow_week: bool | None = None
+    # For each key of ``inputs`` (ratio sides, derived inputs): that input's
+    # own ``metricflow_week``, i.e. how MetricFlow builds this side at week
+    # grain. ``distinct_over_week`` means read that input from the weekly
+    # series file (customer_churn_rate's denominator is the week's distinct
+    # active subscriptions there, not the last day's count that
+    # ``input_time_aggregation`` gives).
+    input_metricflow_week: dict[str, str] = Field(default_factory=dict)
     # Whether each world's ``weekly_series`` file carries this metric: true
     # for every simple count_distinct metric, whose week value cannot be
     # derived from its days.
@@ -808,6 +815,7 @@ def _metric_inputs(layer, name: str, stocks: frozenset[str]) -> dict[str, Any]:
         "has_sides": layer.has_sides(name),
         "metricflow_week": layer.metricflow_week(name),
         "matches_metricflow_week": layer.matches_metricflow_week(name, stocks),
+        "input_metricflow_week": {key: layer.metricflow_week(m) for key, m in inputs.items()},
     }
 
 

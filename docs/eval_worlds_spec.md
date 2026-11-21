@@ -1286,7 +1286,9 @@ rather than left in prose:
 
 - `metricflow_week`: the rule above;
 - `matches_metricflow_week`: whether `time_aggregation` applied to the
-  daily series gives MetricFlow's week number. False for 11 metrics across
+  daily series gives MetricFlow's week number;
+- `input_metricflow_week` (ratios and derived metrics): each input's own
+  `metricflow_week` (below). The first two fields are on every metric. False for 11 metrics across
   the four verticals: `mrr`, `active_subscriptions`, `dau`,
   `paying_active_users`, `wau`, `arpu`, `customer_churn_rate`,
   `open_deals`, `open_pipeline_value`, `customer_base`,
@@ -1299,7 +1301,23 @@ tree should use. A consumer that must reproduce `mf query` uses
 `metricflow_week`; one that wants the period's value uses `time_aggregation`;
 none may assume the two agree where `matches_metricflow_week` is false.
 
-**Not a schema bump.** Both fields are new and `time_aggregation` keeps its
+**Each side of a ratio, too.** `customer_churn_rate` divides churned
+subscriptions by active subscriptions. `input_time_aggregation` says the
+denominator is `end_of_period` (the last day's count), while MetricFlow's
+weekly rate divides by the week's *distinct* active subscriptions, which the
+weekly series file serves; the runner measured that about 0.7% above the
+last-day count. So every ratio and derived metric also carries
+`input_metricflow_week`: for each key of `inputs`, that input's own
+`metricflow_week` (`{"numerator": "sum_of_days", "denominator":
+"distinct_over_week"}` here). `distinct_over_week` on a side means: read that
+side from the weekly series file. A reader reproducing MetricFlow builds
+each side by it and never has to infer which file holds the side.
+`input_time_aggregation` stays the business rule.
+
+**Not answered: month grain.** MetricFlow's monthly distinct counts (and so
+the monthly churn rate's denominator) are not in any file; only weeks are.
+
+**Not a schema bump.** The fields are new and `time_aggregation` keeps its
 meaning, so a version 2 reader that ignores them reads every value as
 before. (A reader that validates the manifest strictly, as
 `load_world_set` does with an older fake_companies, rejects the unknown

@@ -379,6 +379,11 @@ both: `metrics[].metricflow_week` is MetricFlow's rule (`sum_of_days`,
 `matches_metricflow_week` says whether the two agree. They do not for stocks
 (MetricFlow adds up seven days of MRR), distinct counts, cumulative metrics,
 and ratios or formulas built on any of those.
+For a ratio or derived metric, `input_metricflow_week` gives each input's
+MetricFlow rule: `customer_churn_rate`'s denominator is `distinct_over_week`,
+so MetricFlow's weekly rate divides by the week's distinct active
+subscriptions from the weekly series file, not by the last day's count that
+`input_time_aggregation` (`end_of_period`) gives. Months are not served.
 
 **Read the measured numbers as effect plus noise.** A single world and its null
 twin share a seed, but most entity builders draw for the whole timeline from one

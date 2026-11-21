@@ -282,6 +282,14 @@ def test_stocks_and_windows_are_marked_in_the_manifest(tmp_path):
     assert mfw["visit_signup_rate"] == ("ratio_of_week_inputs", True)
     assert mfw["customer_churn_rate"] == ("ratio_of_week_inputs", False)
     assert mfw["arpu"] == ("derived_of_week_inputs", False)
+    churn = next(m for m in manifest.metrics if m.name == "customer_churn_rate")
+    # the business rule takes the last day's active subscriptions; MetricFlow
+    # takes the week's distinct ones, which the weekly series file serves
+    assert churn.input_time_aggregation["denominator"] == "end_of_period"
+    assert churn.input_metricflow_week == {
+        "numerator": "sum_of_days",
+        "denominator": "distinct_over_week",
+    }
     world = manifest.worlds[0]
     assert world.path is None and world.series == "baseline/s0/null.series.parquet"
     files = sorted(p.name for p in (tmp_path / "baseline" / "s0").iterdir())
