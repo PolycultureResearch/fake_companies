@@ -1,76 +1,430 @@
-# Breakdown metric tree for the White Cube (b2c_saas) scenario.
+# White Cube (b2c_saas): the canonical Breakdown tree.
 #
-# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
-#   mf query --metrics <name> --group-by metric_time__day --csv
-# run inside the dbt project (`provider.project_path`). The tree encodes the
-# acquisition -> activation -> revenue funnel so Breakdown's Bayesian RCA can
-# attribute an MRR movement back to its upstream driver (e.g. a paid-search
-# budget cut cascading to sessions -> signups -> trials -> new MRR).
+# Adopted from Breakdown's demo tree (breakdown repo, demo/white_cube_tree.yml
+# at 0a054c2), which the evaluation runner already scores against and which
+# has been through several reviews; this copy differs only in this header and
+# the provider block, which points at this repo's dbt project. Keep the two
+# in step: a change to either changes every White Cube score (Breakdown's
+# evaluation spec §4.3). docs/canonical_trees.md reviews it beside the other
+# three and lists what it would change.
+#
+# White Cube is a B2C subscription app for visual artists. Freemium with a
+# 7-day trial; plans are studio ($12/mo) and professional ($29/mo).
+#
+# Questions it answers:
+#   - Why did net new MRR move: new business, expansion, contraction or churn?
+#   - New business: traffic (which channel, was it spend), signup rate, trial
+#     start, activation and trial conversion, or price per new subscription?
+#   - Churn: more cancellations because the base grew or because the churn
+#     rate rose, and does disengagement explain the rate?
+#
+# Apex is net_new_mrr, not MRR. Explaining the *level* of a stock is not a
+# well-posed question; explaining the flow that moves it is.
+#
+# Dimension identifiers are MetricFlow's `<entity>__<dimension>` form.
+
 provider:
   type: local
-  project_path: "../dbt/b2c_saas" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+  project_path: "../dbt/b2c_saas" # set FAKE_DB to the duckdb
 
 metrics:
+  # ---------------------------------------------------------------- acquisition
   - name: marketing_spend
-    description: Paid acquisition spend across channels.
-    seasonality:
-      - { period: 7, name: weekly }
-      - { period: 365, name: annual }
+    description: "Ad-platform spend across paid channels"
+    source: white_cube.metrics.marketing_spend
+    # A lever, not an outcome: spending more is a decision, not bad news, so
+    # the tree makes no good/bad claim about its movement.
+    direction: neutral
+    format: currency
+    dimensions:
+      channel: spend__channel
 
   - name: sessions
-    description: Web sessions (paid channels scale with spend).
+    description: "Web sessions. Paid sessions are bought; organic and referral are earned"
+    source: white_cube.metrics.sessions
+    direction: up_is_good
+    format:
+      style: number
+      unit: sessions / day
+      decimals: 0
     parents: [marketing_spend]
     priors:
       coefficient:
-        distribution: Normal
-        params: { mu: 2.0, sigma: 0.5 } # ~sessions per $ of spend
+        # Blended cost per session across paid channels is ~$1, so roughly one
+        # extra session per extra dollar — but only the paid share responds.
+        distribution: "Normal"
+        params: { mu: 1.0, sigma: 0.4 }
+    expected_signs: { marketing_spend: positive }
+    trend: linear
     seasonality:
-      - { period: 7, name: weekly }
+      - period: 7
+        name: weekly
+    dimensions:
+      channel: session__channel
+      country: session__country
+      device: session__device
+
+  - name: visit_signup_rate
+    description: "Share of sessions that become signups"
+    source: white_cube.metrics.visit_signup_rate
+    kind: rate
+    direction: up_is_good
+    # Upstream defines this metric as `signups / sessions` (a MetricFlow
+    # `ratio` metric — see the dbt project's semantic manifest), so a window's
+    # rate is Σsignups / Σsessions, not the mean of the daily rates.
+    denominator: sessions
+    # Every signup came from a session, so this is a proportion: a what-if that
+    # pushes it past 1 is impossible, not merely unprecedented. Declared, not
+    # inferred — `denominator` alone means "Σsignups / Σsessions", which is
+    # equally true of trial_days_active below (days per trial, up to 7).
+    share: true
+    format:
+      style: percent
+      decimals: 2
+    # No dimensions: the only ones MetricFlow exposes on this ratio reach it
+    # through the `user` entity, and a session that never signed up has no
+    # user — so ~96% of the weight lands in __null__ and the slice says
+    # nothing. Slice `signups` by device or country instead; same question,
+    # answered on the side of the ratio that actually carries the attribute.
 
   - name: signups
-    description: New user signups.
-    parents: [sessions]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.04, sigma: 0.01 } # visit -> signup rate
+    description: "New free accounts created"
+    source: white_cube.metrics.signups
+    direction: up_is_good
+    format:
+      style: number
+      unit: signups / day
+      decimals: 0
+    formula: "sessions * visit_signup_rate"
+    parents: [sessions, visit_signup_rate]
+    dimensions:
+      country: user__country
+      device: user__device
+      channel: user__signup_channel
 
+  # ---------------------------------------------------------------------- trial
   - name: trials_started
-    description: Trials started from signups.
+    description: "Signups that start a 7-day trial rather than staying free"
+    source: white_cube.metrics.trials_started
+    direction: up_is_good
+    format:
+      style: number
+      unit: trials / day
+      decimals: 0
     parents: [signups]
     priors:
       coefficient:
-        distribution: Normal
-        params: { mu: 0.55, sigma: 0.05 }
+        distribution: "Normal"
+        params: { mu: 0.45, sigma: 0.12 }
+    expected_signs: { signups: positive }
+    dimensions:
+      country: trial__country
+      device: trial__device
+      channel: trial__signup_channel
+
+  - name: trial_activation_rate
+    description: "Share of a trial cohort that uploads their first work during the trial, by cohort start week"
+    source: white_cube.metrics.trial_activation_rate
+    grain: week
+    kind: rate
+    direction: up_is_good
+    # Cohort-dated like trial_conversion_rate: fct_trials aggregates on
+    # trial_start_date, so this week's activation rate describes the same
+    # cohort as this week's conversion rate — the edge is contemporaneous.
+    denominator: trials_started
+    # A share of the cohort: at most all of it activates.
+    share: true
+    format:
+      style: percent
+      decimals: 1
+
+  - name: trial_days_active
+    description: "Mean distinct days a trial cohort used the product during its 7-day trial"
+    source: white_cube.metrics.trial_days_active
+    grain: week
+    kind: rate
+    direction: up_is_good
+    denominator: trials_started
+    # Deliberately no `share`: this is a mean *count* per trial (0–7 days), not
+    # a proportion of trials_started. It declares the same `denominator` as the
+    # two rates either side of it, which is why the C26 ceiling is a separate
+    # declaration rather than something read off `denominator`.
+    format:
+      style: number
+      unit: days
+      decimals: 2
+
+  - name: trial_conversion_rate
+    description: "Share of a trial cohort that converts to paid, by cohort start week"
+    source: white_cube.metrics.trial_conversion_rate
+    grain: week
+    kind: rate
+    direction: up_is_good
+    # Upstream defines this metric as `trial_conversions / trials_started` (a
+    # MetricFlow `ratio` metric), and both sides are cohort-dated by trial
+    # start — so the daily `trials_started` sums into exactly this node's week.
+    # That is a temporal weight, which resamples; it is *not* a slicing weight,
+    # which would need the daily series cut by a dimension it does not carry
+    # at week grain. Hence a denominator here and still no dimensions below.
+    denominator: trials_started
+    # A share of the cohort: at most all of it converts.
+    share: true
+    # Conversion follows engagement: a cohort that activates (uploads work)
+    # and uses more trial days converts better. Both parents describe the same
+    # cohort week, so neither is lagged — and both ride the same underlying
+    # engagement, so expect the fit to split credit between them less surely
+    # than it sizes their sum (collinearity; roadmap S4).
+    parents: [trial_activation_rate, trial_days_active]
+    priors:
+      trial_activation_rate:
+        # Points of conversion per point of activation: a cohort activating
+        # 10pts more converts ~2-3pts more.
+        distribution: "Normal"
+        params: { mu: 0.25, sigma: 0.15 }
+      trial_days_active:
+        # Points of conversion per extra mean active day.
+        distribution: "Normal"
+        params: { mu: 0.05, sigma: 0.04 }
+    expected_signs:
+      trial_activation_rate: positive
+      trial_days_active: positive
+    format:
+      style: percent
+      decimals: 1
+    # No dimensions: blending a sliced rate needs weights at the rate's own
+    # grain, and the natural weight here (trials_started) is a daily node. The
+    # question "which segment converted worse" is answerable — and easier to
+    # read — on trial_conversions below, in conversions rather than percentages.
+
+  - name: trial_conversions
+    description: "Trials that converted, dated by the week the trial started"
+    source: white_cube.metrics.trial_conversions
+    grain: week
+    direction: up_is_good
+    # Exact at week grain: trial_conversion_rate is this over trials_started, and
+    # the daily trials_started parent resamples up by sum.
+    formula: "trials_started * trial_conversion_rate"
+    parents: [trials_started, trial_conversion_rate]
+    format:
+      style: number
+      unit: conversions / week
+      decimals: 0
+    dimensions:
+      country: trial__country
+      device: trial__device
+      plan: trial__plan
+
+  # ------------------------------------------------------------------------ MRR
+  - name: reactivations
+    description: "Paid subscriptions restarted by returning users — churned members and lapsed trials"
+    source: white_cube.metrics.reactivations
+    grain: week
+    direction: up_is_good
+    format:
+      style: number
+      unit: subscriptions / week
+      decimals: 0
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
+
+  - name: direct_conversions
+    description: "Paid subscriptions started without a trial"
+    source: white_cube.metrics.direct_conversions
+    grain: week
+    direction: up_is_good
+    format:
+      style: number
+      unit: subscriptions / week
+      decimals: 0
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
 
   - name: new_subscriptions
-    description: Trials converting to paid.
-    parents: [trials_started]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.20, sigma: 0.03 }
+    description: "Paid subscriptions booked, dated by the booking event"
+    source: white_cube.metrics.new_subscriptions
+    grain: week
+    direction: up_is_good
+    # A cohort-aligned lagged identity, not a learned edge: every way into a
+    # paid plan is one of these three terms. trial_conversions is cohort-dated
+    # (fct_trials aggregates on trial_start_date) while this node is
+    # event-dated (fct_mrr_movements on event_date), and one week of lag *is*
+    # the 7-day trial — last week's trial cohort books this week, alongside
+    # this week's reactivations and direct conversions. The `source` makes it
+    # measured: the identity is checked against the fetched series at load,
+    # and `unexplained` means the books disagree, not "noise".
+    formula: "trial_conversions + reactivations + direct_conversions"
+    parents: [trial_conversions, reactivations, direct_conversions]
+    lags: { trial_conversions: 1 }
+    format:
+      style: number
+      unit: subscriptions / week
+      decimals: 0
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
+
+  - name: new_arpu
+    description: "Average MRR booked per new subscription"
+    source: white_cube.metrics.new_arpu
+    grain: week
+    kind: rate
+    # Mix caveat: this can rise because the professional plan's share of
+    # bookings rose, not because anyone pays more — but more dollars booked
+    # per subscription is still the direction the business wants.
+    direction: up_is_good
+    format: currency
+    dimensions:
+      plan: { source: mrr_movement__plan, weight: new_subscriptions }
 
   - name: new_mrr
-    description: MRR added by new subscriptions.
-    parents: [new_subscriptions]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 25.0, sigma: 5.0 } # ~ARPU of a converting plan
-
-  # Revenue identity: MRR = ARPU x active subscriptions (deterministic node).
-  - name: arpu
-    description: Average revenue per active subscription.
-    seasonality:
-      - { period: 30, name: monthly }
+    description: "MRR added by new and reactivated subscriptions"
+    source: white_cube.metrics.new_mrr
+    grain: week
+    direction: up_is_good
+    formula: "new_subscriptions * new_arpu"
+    parents: [new_subscriptions, new_arpu]
+    format: currency
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
 
   - name: active_subscriptions
-    description: Count of active paid subscriptions.
-    seasonality:
-      - { period: 7, name: weekly }
+    description: "Distinct paid subscriptions active during the week"
+    source: white_cube.metrics.active_subscriptions
+    grain: week
+    kind: stock
+    direction: up_is_good
+    format:
+      style: number
+      unit: subscriptions
+      decimals: 0
+    dimensions:
+      plan: subscription_day__plan
+      country: user__country
 
-  - name: mrr
-    description: Monthly recurring revenue (ARPU x active subscriptions).
-    parents: [arpu, active_subscriptions]
-    formula: "arpu * active_subscriptions"
+  - name: member_activity_rate
+    description: "Share of member-days with product activity — how much of the paying base actually uses the product"
+    source: white_cube.metrics.member_activity_rate
+    grain: week
+    kind: rate
+    direction: up_is_good
+    no_denominator: >-
+      The true denominator is member-days (one per active subscription per
+      day), which is deliberately not a tree metric; weighting by weekly
+      active_subscriptions instead would claim an identity that does not
+      close, since a week's distinct subscriptions is not seven days of
+      member-days.
+    # A share all the same, and this is the node that proves the two questions
+    # are separate: it has no denominator the tree can name, and it is still a
+    # proportion of member-days that cannot pass 1. Undeclared, a +300% what-if
+    # simulated it to 1.025 — 102.5% of members active — and the response
+    # called that "above the historical max" (roadmap C26).
+    share: true
+    format:
+      style: percent
+      decimals: 1
+
+  - name: customer_churn_rate
+    description: "Share of active subscriptions that cancelled"
+    source: white_cube.metrics.customer_churn_rate
+    grain: week
+    kind: rate
+    direction: down_is_good
+    # Disengagement precedes cancellation: weeks where fewer members use the
+    # product are weeks more of them churn. Contemporaneous at week grain —
+    # the demo's churn ledger books cancels in the low-engagement weeks
+    # themselves.
+    parents: [member_activity_rate]
+    priors:
+      coefficient:
+        # Weekly churn points per point of member activity; negative.
+        distribution: "Normal"
+        params: { mu: -0.02, sigma: 0.02 }
+    expected_signs: { member_activity_rate: negative }
+    # A share of the active base: at most all of it cancels, and none of it is
+    # a negative cancellation. The floor was already flagged from history
+    # ("never been negative"); declaring the share makes it the tree's claim
+    # rather than an inference from the sample, and adds the ceiling.
+    share: true
+    format:
+      style: percent
+      decimals: 2
+    # plan is deliberately absent: this ratio spans two semantic models whose
+    # plan dimensions are distinct (mrr_movement__plan vs subscription_day__plan),
+    # so MetricFlow exposes only the dimensions reachable from both via `user`.
+    # Slice churned_mrr by plan instead — same story, in dollars.
+    dimensions:
+      country: { source: user__country, weight: active_subscriptions }
+
+  - name: churned_subscriptions
+    description: "Subscriptions cancelled during the week"
+    source: white_cube.metrics.churned_subscriptions
+    grain: week
+    direction: down_is_good
+    formula: "active_subscriptions * customer_churn_rate"
+    parents: [active_subscriptions, customer_churn_rate]
+    format:
+      style: number
+      unit: cancellations / week
+      decimals: 0
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
+
+  - name: churn_arpu
+    description: "Average MRR lost per cancellation"
+    source: white_cube.metrics.churn_arpu
+    grain: week
+    kind: rate
+    # Dollars lost per cancellation: fewer is better. Mix caveat as with
+    # new_arpu — a drop can mean cheaper customers are the ones churning.
+    direction: down_is_good
+    format: currency
+    dimensions:
+      plan: { source: mrr_movement__plan, weight: churned_subscriptions }
+
+  - name: churned_mrr
+    description: "MRR lost to cancellations (positive magnitude)"
+    source: white_cube.metrics.churned_mrr
+    grain: week
+    direction: down_is_good
+    formula: "churned_subscriptions * churn_arpu"
+    parents: [churned_subscriptions, churn_arpu]
+    format: currency
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
+
+  - name: expansion_mrr
+    description: "MRR added by upgrades"
+    source: white_cube.metrics.expansion_mrr
+    grain: week
+    direction: up_is_good
+    format: currency
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
+
+  - name: contraction_mrr
+    description: "MRR lost to downgrades (positive magnitude)"
+    source: white_cube.metrics.contraction_mrr
+    grain: week
+    direction: down_is_good
+    format: currency
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country
+
+  - name: net_new_mrr
+    description: "Net MRR movement — what actually grows or shrinks the business each week"
+    source: white_cube.metrics.net_new_mrr
+    grain: week
+    direction: up_is_good
+    formula: "new_mrr + expansion_mrr - contraction_mrr - churned_mrr"
+    parents: [new_mrr, expansion_mrr, contraction_mrr, churned_mrr]
+    format: currency
+    dimensions:
+      plan: mrr_movement__plan
+      country: user__country

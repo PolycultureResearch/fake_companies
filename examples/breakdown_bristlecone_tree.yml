@@ -1,63 +1,180 @@
-# Breakdown metric tree for the Bristlecone (cpg_wholesale) scenario.
+# Bristlecone Botanicals (cpg_wholesale): the canonical Breakdown tree.
 #
-# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
-#   mf query --metrics <name> --group-by metric_time__day --csv
-# run inside the CPG dbt project (`provider.project_path`).
+# The tree a CPG sales-and-finance analyst keeps for a brand that sells to
+# retailers and distributors: consumer sell-through (POS), sell-in
+# (shipments), the retail inventory between them, realized price per case,
+# and the trade promotions and advertising believed to drive consumption.
+# It is the tree Breakdown's evaluation scores against (eval-worlds spec §5
+# item 2; docs/canonical_trees.md says why it has this shape and which
+# scenarios the world set plants in it).
 #
-# The causal graph is the point of this scenario: consumer POS drives
-# wholesale shipments with a replenishment lag, and marketing_spend is a
-# deliberately DISCONNECTED node — the generator couples it to nothing, so an
-# RCA tool that attributes a revenue move to the brand_budget_cut anomaly is
-# wrong, and one that finds no edge is right.
+# Questions it answers:
+#   - Why did net sales drop: volume or price per case? If price, is it a
+#     list-price change (within a category) or a shift toward cheaper
+#     categories and channels (mix)?
+#   - Did shipments fall because shoppers bought less (POS down), or because
+#     retailers stopped reordering and ran down their stock (POS flat, the
+#     trade inventory build falling)? The sell-in/sell-through question.
+#   - Which retailer or category lost consumption? A delisting or a lost
+#     shelf position shows as one banner's POS falling.
+#   - Did the promotion or the advertising drive the POS lift? (In this
+#     company advertising is decoupled from sales by construction: the edge
+#     from marketing_spend is the analyst's belief, and the right answer is
+#     that it explains nothing.)
+#
+# Grain: weekly throughout. The POS feed is weekly (each week's scans are
+# keyed to its Monday), and the trade plans, promotions and replenishment
+# all run in weeks.
+#
+# Every node binds to a generator metric by name. Retailers: POS slices by
+# `retailer_banner`; shipments only by `channel_type`. Each banner is its own
+# channel type here (whole_earth natural, greenfields grocery, summit_mart
+# mass, vital_online online, independents via two distributors), so the two
+# dimensions name the same five retailers.
+
+tree:
+  title: "Bristlecone Botanicals: sell-through to net sales"
+  description: "POS, shipments, retail inventory, price per case, trade and advertising"
+
 provider:
   type: local
-  project_path: "../dbt/cpg_wholesale" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+  project_path: "../dbt/cpg_wholesale" # set FAKE_DB to the duckdb
 
 metrics:
+  # ------------------------------------------------------- demand drivers
   - name: marketing_spend
-    description: Brand ad spend. Deliberately edge-free (decoupled from sales).
-    seasonality:
-      - { period: 7, name: weekly }
+    description: "Brand advertising: paid social, paid search, podcasts"
+    source: bristlecone.metrics.marketing_spend
+    grain: week
+    direction: neutral
+    format: currency
+    dimensions:
+      channel: spend__channel
 
-  - name: pos_units
-    description: Consumer units scanned at retail (weekly grain, week_start-keyed).
-    seasonality:
-      - { period: 365, name: annual } # deep-winter cold-and-flu peak
-
-  - name: pos_dollars
-    description: Consumer retail dollars scanned.
-    parents: [pos_units]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 6.5, sigma: 1.5 } # ~retail price per unit
-
-  - name: shipped_cases
-    description: Wholesale cases shipped (replenishment lags POS by ~1-2 weeks).
-    parents: [pos_units]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.13, sigma: 0.04 } # ~1/case_size with ordering noise
-
-  - name: wholesale_gross_revenue
-    description: Shipment value at list case prices.
-    parents: [shipped_cases]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 33.0, sigma: 8.0 } # ~average case price
-
+  # Off-invoice trade discounts on shipments while a promotion runs. The
+  # retailer passes the discount to the shelf, which is what lifts POS.
   - name: trade_spend
-    description: Off-invoice trade discounts (promo calendar).
-    parents: [wholesale_gross_revenue]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.03, sigma: 0.02 } # trade share of gross
+    description: "Off-invoice trade-promotion discounts granted"
+    source: bristlecone.metrics.trade_spend
+    grain: week
+    direction: neutral
+    format: currency
+    dimensions:
+      category: shipment__category
+      channel_type: shipment__channel_type
 
-  # Revenue identity: net = gross - trade spend (deterministic node).
+  # ------------------------------------------------------------ sell-through
+  # Consumer units scanned. Cold-and-flu season moves it about ±30% over the
+  # year; with two years of data an annual component is never identifiable
+  # inside an RCA's fit window (it needs two whole cycles), so a looser local
+  # level follows the season instead.
+  - name: pos_units
+    description: "Consumer units scanned at retail"
+    source: bristlecone.metrics.pos_units
+    grain: week
+    direction: up_is_good
+    parents: [trade_spend, marketing_spend]
+    expected_signs: { trade_spend: positive, marketing_spend: positive }
+    trend: { type: linear, sigma: 0.15 }
+    dimensions:
+      retailer_banner: scan__retailer_banner
+      category: scan__category
+      channel_type: scan__channel_type
+
+  # Consumer dollars: the retailers' revenue from the brand, the number a
+  # category review is held to. A sink: the brand is paid for cases, not
+  # scans. The edge is the average shelf price.
+  - name: pos_dollars
+    description: "Consumer dollars scanned at retail"
+    source: bristlecone.metrics.pos_dollars
+    grain: week
+    direction: up_is_good
+    format: currency
+    parents: [pos_units]
+    priors:
+      coefficient: { distribution: Normal, params: { mu: 8.0, sigma: 3.0 } }
+    expected_signs: { pos_units: positive }
+    dimensions:
+      retailer_banner: scan__retailer_banner
+      category: scan__category
+
+  # --------------------------------------------------------------- sell-in
+  # Each account reorders last week's scans, in cases, a few days into the
+  # week. The coefficient is cases per consumer unit (about 1/8).
+  - name: shipped_cases
+    description: "Wholesale cases shipped to retailers and distributors"
+    source: bristlecone.metrics.shipped_cases
+    grain: week
+    direction: up_is_good
+    parents: [pos_units]
+    lags: { pos_units: 1 }
+    priors:
+      coefficient: { distribution: Normal, params: { mu: 0.13, sigma: 0.05 } }
+    expected_signs: { pos_units: positive }
+    trend: linear
+    dimensions:
+      category: shipment__category
+      channel_type: shipment__channel_type
+
+  # Retail inventory built since the data starts (units): sell-in less
+  # sell-through. A stock whose weekly change is shipped units less POS
+  # units, so the edges are a regression of the level on this week's flows
+  # with a local level carrying last week's balance; the level steps by the
+  # week's net flow, hence the loose trend. Shipments down with this falling
+  # and POS flat is a destock.
+  - name: trade_inventory_build
+    description: "Units in retail inventory, as the change since the data starts"
+    source: bristlecone.metrics.trade_inventory_build
+    grain: week
+    kind: stock
+    direction: neutral
+    parents: [shipped_cases, pos_units]
+    expected_signs: { shipped_cases: positive, pos_units: negative }
+    trend: { type: linear, sigma: 0.3 }
+    dimensions:
+      retailer_banner: inventory_flow__retailer_banner
+      category: inventory_flow__category
+
+  # ----------------------------------------------------------- price, sales
+  # Realized net price per case: list price, less trade, averaged over the
+  # mix shipped. Sliced by category, its change splits into `within` (a
+  # category's own price moved: a list-price change or deeper trade) and
+  # `mix` (cases shifted toward cheaper or dearer categories or channels).
+  - name: avg_case_price
+    description: "Net revenue per case shipped"
+    source: bristlecone.metrics.avg_case_price
+    grain: week
+    kind: rate
+    denominator: shipped_cases
+    direction: up_is_good
+    format: currency
+    dimensions:
+      category: shipment__category
+      channel_type: shipment__channel_type
+
+  # The apex, and the identity a price-volume-mix review starts from.
   - name: wholesale_net_revenue
-    description: Wholesale revenue net of trade discounts (the topline).
-    parents: [wholesale_gross_revenue, trade_spend]
-    formula: "wholesale_gross_revenue - trade_spend"
+    description: "Shipment value net of trade discounts: the topline"
+    source: bristlecone.metrics.wholesale_net_revenue
+    grain: week
+    direction: up_is_good
+    format: currency
+    formula: "shipped_cases * avg_case_price"
+    parents: [shipped_cases, avg_case_price]
+    dimensions:
+      category: shipment__category
+      channel_type: shipment__channel_type
+
+  # Gross sales at list price: net plus the trade given away. A sink that
+  # makes gross-to-net a checked identity.
+  - name: wholesale_gross_revenue
+    description: "Shipment value at list case prices"
+    source: bristlecone.metrics.wholesale_gross_revenue
+    grain: week
+    direction: up_is_good
+    format: currency
+    formula: "wholesale_net_revenue + trade_spend"
+    parents: [wholesale_net_revenue, trade_spend]
+    dimensions:
+      category: shipment__category
+      channel_type: shipment__channel_type
