@@ -1020,7 +1020,9 @@ holds it to `mf query` (totals and every slice).
   builds inventory for about a week before orders follow, then holds that
   level, which is the replenishment lag seen as a stock. An absolute level
   would need an opening stock the data does not contain; a constant would
-  only hide that.
+  only hide that. For the same reason its *relative* change is relative to
+  an arbitrary level: score its effects in units (`mean_diff_mean`), not
+  `rel_change_mean`.
 - *POS is spread over its week.* The POS feed reports a week of units on
   its Monday. Taken as is, the daily balance would drop by a week of sales
   every Monday and climb back as the shipments land; spread evenly over the
