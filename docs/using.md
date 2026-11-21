@@ -297,6 +297,13 @@ set root has a `verdict` per regime, anomaly, metric and slice:
 `established_up` / `established_down` (the mean across seeds is far enough from
 zero by the seeds' own spread, two-sided 1%), `open`, `exactly_zero` (no seed's
 twins ever differ) or `undefined`. Choose targets from it, not from one world.
+A small set (three seeds) can rarely reach the 1% bar (|t| ≥ 9.9), so the same
+file also has `verdict_10pct`, the same test at two-sided 10% (|t| ≥ 2.9 at
+three seeds), which establishes about one in ten effects that do not exist:
+use it only when the strict one cannot answer, and say so.
+`seeds_to_establish` / `seeds_to_establish_10pct` project how many seeds each
+row would need at each level. `worlds.json` → `verdicts` lists every verdict
+column with its `level`, `t_critical` at this set's seed count and `min_seeds`.
 
 **`*.series.parquet`** (every world: null, single, story) is the daily series
 of every metric, as MetricFlow would return it, so a consumer needs neither dbt

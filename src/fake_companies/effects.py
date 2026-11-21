@@ -511,23 +511,53 @@ def ground_truth_fields(
 
 SUMMARY_KEYS = ["regime", "anomaly", "metric", "dimension", "value"]
 
-# Two-sided 1% points of Student's t by degrees of freedom (1..30), then normal.
-_T_CRIT_01 = [
-    63.657, 9.925, 5.841, 4.604, 4.032, 3.707, 3.499, 3.355, 3.250, 3.169,
-    3.106, 3.055, 3.012, 2.977, 2.947, 2.921, 2.898, 2.878, 2.861, 2.845,
-    2.831, 2.819, 2.807, 2.797, 2.787, 2.779, 2.771, 2.763, 2.756, 2.750,
-]  # fmt: skip
+# Two-sided points of Student's t by degrees of freedom (1..30), then normal.
+_T_CRIT = {
+    0.01: (
+        [
+            63.657, 9.925, 5.841, 4.604, 4.032, 3.707, 3.499, 3.355, 3.250, 3.169,
+            3.106, 3.055, 3.012, 2.977, 2.947, 2.921, 2.898, 2.878, 2.861, 2.845,
+            2.831, 2.819, 2.807, 2.797, 2.787, 2.779, 2.771, 2.763, 2.756, 2.750,
+        ],
+        2.576,
+    ),
+    0.10: (
+        [
+            6.314, 2.920, 2.353, 2.132, 2.015, 1.943, 1.895, 1.860, 1.833, 1.812,
+            1.796, 1.782, 1.771, 1.761, 1.753, 1.746, 1.740, 1.734, 1.729, 1.725,
+            1.721, 1.717, 1.714, 1.711, 1.708, 1.706, 1.703, 1.701, 1.699, 1.697,
+        ],
+        1.645,
+    ),
+}  # fmt: skip
+
+# The set's verdicts: (column, two-sided level, column of the projected seed
+# count). ``verdict`` is the strict one and the one to pick targets by; the
+# looser one exists for small sets, where the strict bar is out of reach
+# (three seeds need |t| >= 9.9). Each column names its level so the two cannot
+# be mistaken for each other; ``worlds.json`` -> ``verdicts`` describes both.
+VERDICTS: list[tuple[str, float, str]] = [
+    ("verdict", 0.01, "seeds_to_establish"),
+    ("verdict_10pct", 0.10, "seeds_to_establish_10pct"),
+]
+MIN_SEEDS_TO_ESTABLISH = 2  # with one seed there is no spread, so nothing is established
 
 
-def t_critical(n_seeds: int) -> float:
-    """The |t| a cross-seed mean must reach to be *established* (two-sided 1%)."""
+def t_critical(n_seeds: int, level: float = 0.01) -> float:
+    """The |t| a cross-seed mean must reach to be *established* at a
+    two-sided ``level`` (0.01 or 0.10)."""
+    if level not in _T_CRIT:
+        raise ValueError(f"no t table for level {level!r}; known: {sorted(_T_CRIT)}")
+    table, normal = _T_CRIT[level]
     df = n_seeds - 1
     if df < 1:
         return float("inf")
-    return _T_CRIT_01[df - 1] if df <= len(_T_CRIT_01) else 2.576
+    return table[df - 1] if df <= len(table) else normal
 
 
-def set_verdict(mean: float, sd: float, n_seeds: int, differs_share: float) -> str:
+def set_verdict(
+    mean: float, sd: float, n_seeds: int, differs_share: float, level: float = 0.01
+) -> str:
     """One verdict per (anomaly, metric, slice) for the whole set.
 
     - ``exactly_zero``: the twins never differ in any seed (the anomaly cannot
@@ -535,7 +565,7 @@ def set_verdict(mean: float, sd: float, n_seeds: int, differs_share: float) -> s
       change);
     - ``established_up`` / ``established_down``: the mean relative change
       across seeds is at least :func:`t_critical` standard errors from zero
-      (two-sided 1%), judged by the seeds' own spread;
+      (two-sided ``level``, 1% by default), judged by the seeds' own spread;
     - ``open``: neither. More seeds may settle it.
     - ``undefined``: no relative change exists (the null level is zero).
 
@@ -549,9 +579,30 @@ def set_verdict(mean: float, sd: float, n_seeds: int, differs_share: float) -> s
         return "open"
     if sd == 0:
         return "open" if mean == 0 else ("established_up" if mean > 0 else "established_down")
-    if abs(mean) / (sd / np.sqrt(n_seeds)) >= t_critical(n_seeds):
+    if abs(mean) / (sd / np.sqrt(n_seeds)) >= t_critical(n_seeds, level):
         return "established_up" if mean > 0 else "established_down"
     return "open"
+
+
+def seeds_to_establish(mean: float, sd: float, level: float = 0.01) -> int | None:
+    """The fewest seeds at which this mean and spread would be established.
+
+    A projection, not a promise: it assumes the cross-seed mean and standard
+    deviation stay what this set measured, and finds the smallest ``n`` with
+    ``|mean| / (sd / sqrt(n)) >= t_critical(n, level)``. ``None`` when there
+    is nothing to establish (a zero or undefined mean) or no spread to
+    project from (one seed).
+    """
+    if not (np.isfinite(mean) and np.isfinite(sd)) or mean == 0:
+        return None
+    if sd == 0:
+        return MIN_SEEDS_TO_ESTABLISH
+    ratio = abs(mean) / sd
+    table, normal = _T_CRIT[level]
+    for n in range(MIN_SEEDS_TO_ESTABLISH, len(table) + 2):
+        if ratio * np.sqrt(n) >= t_critical(n, level):
+            return n
+    return max(len(table) + 2, int(np.ceil((normal / ratio) ** 2)))
 
 
 def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
@@ -566,10 +617,17 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
       ``rel_change_sem`` (sd / sqrt(n)): the mean is the best estimate of the
       expected effect, the spread is how far one seed can be from it;
     - ``mean_diff_mean`` / ``mean_diff_sd``: the same in the metric's units;
-    - ``verdict``: :func:`set_verdict` — ``established_up``,
+    - ``verdict``: :func:`set_verdict` at two-sided 1% — ``established_up``,
       ``established_down``, ``open``, ``exactly_zero`` or ``undefined``. This
       is the set's answer to "did this anomaly move this metric", and the one
       to pick a target by;
+    - ``verdict_10pct``: the same test at two-sided 10%, for small sets where
+      1% is out of reach. It establishes about one in ten effects that do not
+      exist; it is never a substitute for ``verdict`` (see :data:`VERDICTS`);
+    - ``seeds_to_establish`` / ``seeds_to_establish_10pct``:
+      :func:`seeds_to_establish` at each level, the projected seed count at
+      which this row's verdict would be established (NULL when there is
+      nothing to establish);
     - ``moved_share``: the share of seeds in which the series moved,
       ``differs_share`` the share in which the twins differ on any day, and
       ``z_window_median``, the median window z across seeds;
@@ -614,10 +672,13 @@ def summarize_across_seeds(per_twin: pd.DataFrame) -> pd.DataFrame:
     out["rel_change_sem"] = out["rel_change_sd"] / np.sqrt(out["n_seeds"])
     with np.errstate(divide="ignore", invalid="ignore"):
         out["t_across_seeds"] = out["rel_change_mean"] / out["rel_change_sem"]
-    out["verdict"] = [
-        set_verdict(mean, sd, n, differs)
-        for mean, sd, n, differs in zip(
-            out["rel_change_mean"], out["rel_change_sd"], out["n_seeds"], out["differs_share"]
+    rows = list(
+        zip(out["rel_change_mean"], out["rel_change_sd"], out["n_seeds"], out["differs_share"])
+    )
+    for column, level, seeds_column in VERDICTS:
+        out[column] = [set_verdict(m, sd, n, d, level) for m, sd, n, d in rows]
+        out[seeds_column] = pd.array(
+            [None if d == 0 else seeds_to_establish(m, sd, level) for m, sd, _, d in rows],
+            dtype="Int64",
         )
-    ]
     return out

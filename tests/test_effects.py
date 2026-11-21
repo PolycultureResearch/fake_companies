@@ -236,6 +236,8 @@ def test_cross_seed_summary():
     assert out["moved_share"] == pytest.approx(2 / 3)
     # -13 standard errors, but with three seeds the bar is t(2) = 9.9
     assert out["verdict"] == "established_down" and out["differs_share"] == 1.0
+    assert out["verdict_10pct"] == "established_down"
+    assert out["seeds_to_establish"] == 3 and out["seeds_to_establish_10pct"] == 2
     assert out["onset_median_lag_days"] == 1
 
 
@@ -253,6 +255,27 @@ def test_set_verdict():
     assert set_verdict(float("nan"), float("nan"), 10, 1.0) == "undefined"
     assert set_verdict(-0.5, 0.0, 10, 1.0) == "established_down"  # a driver-level exact cut
     assert set_verdict(-0.5, float("nan"), 1, 1.0) == "open"  # one seed settles nothing
+
+
+def test_loose_verdict_names_its_level_and_reaches_small_sets():
+    """Three seeds of a +33% effect with a 10% spread: t = 5.7, which the
+    strict bar (9.9) cannot reach and the 10% bar (2.9) can."""
+    from fake_companies.effects import VERDICTS, seeds_to_establish, set_verdict, t_critical
+
+    assert [(c, lvl) for c, lvl, _ in VERDICTS] == [("verdict", 0.01), ("verdict_10pct", 0.10)]
+    assert t_critical(3, 0.10) == pytest.approx(2.920) and t_critical(500, 0.10) == 1.645
+    with pytest.raises(ValueError):
+        t_critical(3, 0.05)
+    assert set_verdict(0.33, 0.10, 3, 1.0) == "open"
+    assert set_verdict(0.33, 0.10, 3, 1.0, level=0.10) == "established_up"
+    assert set_verdict(0.0, 0.0, 3, 0.0, level=0.10) == "exactly_zero"
+    # the projection: smallest n with |mean| / (sd / sqrt(n)) >= t(n)
+    # 3.3 * sqrt(2) = 4.67 < 6.31; n=3: 5.7 >= 2.92
+    assert seeds_to_establish(0.33, 0.10, 0.10) == 3
+    assert seeds_to_establish(0.33, 0.10, 0.01) == 4  # n=4: 6.6 >= 5.84; n=3: 5.7 < 9.9
+    assert seeds_to_establish(0.01, 0.10, 0.01) == int(np.ceil((2.576 / 0.1) ** 2))
+    assert seeds_to_establish(0.5, 0.0) == 2
+    assert seeds_to_establish(0.0, 0.1) is None and seeds_to_establish(0.1, float("nan")) is None
 
 
 def test_persistent_noise_is_not_mistaken_for_an_effect():

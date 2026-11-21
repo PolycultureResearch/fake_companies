@@ -138,6 +138,31 @@ class NoiseDefinition(BaseModel):
     min_placebo_windows: int  # placebo windows needed to use their spread
 
 
+class VerdictDefinition(BaseModel):
+    """One verdict column of ``effects_summary.parquet`` and its test.
+
+    Every verdict tests the cross-seed mean relative change against its
+    standard error (``t_across_seeds``) with Student's t at ``n_seeds - 1``
+    degrees of freedom, two-sided at ``level``. The column name carries the
+    level too (``verdict`` is the strict 1% one, ``verdict_10pct`` the loose
+    one), so a reader never has to guess which one it holds.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    column: str  # the verdict column in effects_summary.parquet
+    level: float  # two-sided significance level of the test (0.01, 0.10)
+    # |t_across_seeds| needed to be established at this set's seed count;
+    # None when the set has fewer than ``min_seeds`` seeds (never established).
+    t_critical: float | None
+    # The fewest seeds at which this verdict can be established at all (with
+    # one seed there is no spread). Below it every effect is ``open``.
+    min_seeds: int
+    # Per-row column: the projected seed count at which that row's mean and
+    # spread would be established at this level (NULL: nothing to establish).
+    seeds_to_establish_column: str
+
+
 class WorldSetManifest(BaseModel):
     """``worlds.json``: every world of a set and how they relate."""
 
@@ -155,6 +180,9 @@ class WorldSetManifest(BaseModel):
     # Measured effects: absent (None / empty) for a set built without them.
     effects_summary: str | None = None
     noise: NoiseDefinition | None = None
+    # The verdict columns of effects_summary.parquet, strict first. Empty for
+    # a set built without measured effects.
+    verdicts: list[VerdictDefinition] = Field(default_factory=list)
     metrics: list[MetricInfo] = Field(default_factory=list)
     unsupported_metrics: dict[str, str] = Field(default_factory=dict)  # name -> why left out
     worlds: list[WorldEntry]
@@ -520,8 +548,11 @@ def build_world_set(
     from .effects import (
         INTEGRATED_RATIO,
         MIN_PLACEBO_WINDOWS,
+        MIN_SEEDS_TO_ESTABLISH,
         NOISE_K,
+        VERDICTS,
         summarize_across_seeds,
+        t_critical,
     )
     from .verticals import get_vertical
 
@@ -605,6 +636,22 @@ def build_world_set(
         )
         if measured
         else None,
+        verdicts=[
+            VerdictDefinition(
+                column=column,
+                level=level,
+                t_critical=(
+                    t_critical(len(set(seeds)), level)
+                    if len(set(seeds)) >= MIN_SEEDS_TO_ESTABLISH
+                    else None
+                ),
+                min_seeds=MIN_SEEDS_TO_ESTABLISH,
+                seeds_to_establish_column=seeds_column,
+            )
+            for column, level, seeds_column in VERDICTS
+        ]
+        if measured
+        else [],
         metrics=[
             MetricInfo(
                 name=name,

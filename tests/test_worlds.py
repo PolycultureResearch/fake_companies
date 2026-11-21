@@ -339,6 +339,29 @@ def test_set_summary_has_a_verdict_per_anomaly_and_metric(retail_set):
         "exactly_zero",
         "undefined",
     }
+    assert set(summary["verdict_10pct"]) <= set(summary["verdict"]) | {
+        "established_up",
+        "established_down",
+    }
+    # the loose verdict never contradicts the strict one; it can only settle more
+    strict = summary["verdict"].str.startswith("established")
+    assert (summary.loc[strict, "verdict_10pct"] == summary.loc[strict, "verdict"]).all()
+    assert [v.column for v in manifest.verdicts] == ["verdict", "verdict_10pct"]
+    strict_def, loose_def = manifest.verdicts
+    assert (strict_def.level, loose_def.level) == (0.01, 0.10)
+    assert strict_def.t_critical == pytest.approx(9.925)  # three seeds
+    assert loose_def.t_critical == pytest.approx(2.920)
+    assert strict_def.min_seeds == loose_def.min_seeds == 2
+    for v in manifest.verdicts:
+        col = summary[v.seeds_to_establish_column]
+        # an integer column (pandas reads an integer column with nulls as float)
+        assert duckdb.sql(
+            f"SELECT typeof({v.seeds_to_establish_column}) AS t "
+            f"FROM '{out / manifest.effects_summary}' LIMIT 1"
+        ).fetchone()[0] in ("BIGINT", "INTEGER")
+        settled = summary[v.column].str.startswith("established")
+        assert (col[settled] <= len(manifest.seeds)).all()
+        assert col[summary[v.column] == "exactly_zero"].isna().all()
     rows = summary[summary["anomaly"] == "mobile_checkout_regression"]
     total = rows[rows["dimension"].isna()].set_index("metric")
     assert total.loc["sessions", "verdict"] == "exactly_zero"  # upstream of the anomaly

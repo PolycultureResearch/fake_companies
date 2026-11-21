@@ -888,6 +888,56 @@ moved by one or two seeds either way. Bristlecone did not change.
   noise is small next to the effect. The rebuild under the current `moved`
   rule changed none of this.
 
+## 10. Contract changes asked for by Breakdown's runner (2026-11-20)
+
+After moving to the `b51d70e` contract the runner asked for four things. Each
+is below with the design chosen and why.
+
+### 10.1 Verdicts for small sets
+
+**The problem.** The strict verdict tests the cross-seed mean at two-sided 1%.
+With three seeds that needs |t| ≥ 9.9, so on a smoke-tier set even a +33%
+churn spike stays `open` and the runner has no target.
+
+**Design.** The strict `verdict` is unchanged and stays the one to pick
+targets by. Beside it, in `effects_summary.parquet`:
+
+- `verdict_10pct`: the same test (cross-seed mean over its standard error,
+  Student's t with n − 1 degrees of freedom) at **two-sided 10%**. Same
+  values as `verdict`. At three seeds it needs |t| ≥ 2.92;
+- `seeds_to_establish` and `seeds_to_establish_10pct`: for each row, the
+  fewest seeds at which this set's mean and spread would be established at
+  that level. A projection that assumes the mean and sd hold; NULL when
+  there is nothing to establish (`exactly_zero`, a zero or undefined mean,
+  one seed).
+
+`worlds.json` gains `verdicts`, one entry per verdict column, strict first:
+`column`, `level` (two-sided), `t_critical` at this set's seed count (null
+below `min_seeds`), `min_seeds` (2: with one seed there is no spread and
+nothing is established at any level) and `seeds_to_establish_column`.
+
+**Why this shape.**
+
+- *A second column, not a level parameter on one column.* A reader that
+  knows only `verdict` keeps reading the strict answer; nothing it already
+  trusts changes meaning. The level is in the column name and in the
+  manifest, so the two cannot be confused by a reader that looks at either.
+- *10%, two-sided.* It is the one-sided 5% test in either direction, the
+  usual bar for a directional claim, and the runner's targets come with a
+  declared direction. 5% two-sided would need |t| ≥ 4.3 at three seeds and
+  still miss much of what the smoke sets are built to show. The cost is
+  stated, not hidden: among pairs with no effect, about one in ten is
+  established by chance. `exactly_zero` pairs are excluded by construction
+  (no seed's twins differ), so that rate applies only to pairs whose twins
+  differ, which is most pairs in B2C and few in CPG.
+- *The loose verdict never contradicts the strict one.* Anything
+  established at 1% is established at 10% in the same direction; the loose
+  one can only settle more. A test pins this.
+- *Seeds to establish per row, not one number per set.* The minimum seed
+  count that *can* establish anything is always 2 and says little; what the
+  runner needs to plan a bigger set is the projected count per target, which
+  depends on that target's effect and spread.
+
 ---
 
 *This document is written and maintained by an AI agent (Claude), with human oversight.*
