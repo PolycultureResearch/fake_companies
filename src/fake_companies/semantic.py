@@ -23,7 +23,8 @@ those metrics with the reason, and they are left out of every effects table.
 Supported: ``simple`` metrics over ``sum`` / ``average`` / ``count`` /
 ``count_distinct`` / ``min`` / ``max`` / ``sum_boolean`` measures, ``ratio``
 and ``derived`` metrics over supported metrics (no filters, no offsets), and
-``cumulative`` metrics with a day window. Dimensions: categorical dimensions
+``cumulative`` metrics with a day window, or with no window (a running total
+since the data starts) over an additive measure. Dimensions: categorical dimensions
 declared on the measure's own semantic model (no joins).
 """
 
@@ -208,7 +209,7 @@ class Metric:
     fill: float | None = None  # fill_nulls_with (None: a missing day is NULL)
     inputs: dict[str, str] = field(default_factory=dict)  # alias -> metric name
     expr: str | None = None  # derived: sql over the aliases
-    window_days: int | None = None  # cumulative
+    window_days: int | None = None  # cumulative; None with kind cumulative: all time
 
 
 class SemanticLayer:
@@ -344,10 +345,16 @@ class SemanticLayer:
             ctp = tp.get("cumulative_type_params") or {}
             if set(tp) - {"measure", "cumulative_type_params"} or set(ctp) - {"window"}:
                 raise UnsupportedSemantics("cumulative options beyond a window")
-            m = re.fullmatch(r"(\d+) days?", str(ctp.get("window", "")).strip())
+            measure, fill = self._measure(tp["measure"])
+            if "window" not in ctp:  # a running total since the data starts
+                if measure.agg not in ("sum", "count", "sum_boolean"):
+                    raise UnsupportedSemantics(
+                        f"a cumulative metric with no window over a {measure.agg!r} measure"
+                    )
+                return Metric(name, kind, measure=measure, fill=fill)
+            m = re.fullmatch(r"(\d+) days?", str(ctp["window"]).strip())
             if m is None:
                 raise UnsupportedSemantics(f"cumulative window {ctp.get('window')!r} is not N days")
-            measure, fill = self._measure(tp["measure"])
             return Metric(name, kind, measure=measure, fill=fill, window_days=int(m.group(1)))
         raise UnsupportedSemantics(f"metric type {kind!r}")
 
@@ -655,6 +662,20 @@ class SemanticLayer:
                 sparse = (
                     f"SELECT CAST({m.time_expr} AS DATE) AS d{gsel}, {agg} AS v{sides} "
                     f"FROM dbt.{m.relation} GROUP BY ALL"
+                )
+            elif metric.window_days is None:
+                # cumulative with no window: each day adds up every earlier day
+                # (an additive measure, so the day totals can be added; rows
+                # before the timeline count too, as in MetricFlow)
+                on = "".join(f" AND r.g{i} = s.g{i}" for i in range(len(dims)))
+                days = "_spine"
+                if dims:
+                    days = f"(SELECT * FROM _spine CROSS JOIN (SELECT DISTINCT {gcols[2:]} FROM r))"
+                sparse = (
+                    f"WITH r AS (SELECT CAST({m.time_expr} AS DATE) AS d{gsel}, {agg} AS v "
+                    f"FROM dbt.{m.relation} GROUP BY ALL) "
+                    f"SELECT s.d AS d{''.join(f', s.g{i}' for i in range(len(dims)))}, "
+                    f"sum(r.v) AS v FROM {days} s JOIN r ON r.d <= s.d{on} GROUP BY ALL"
                 )
             else:  # cumulative: each day aggregates the trailing window of rows
                 sparse = (

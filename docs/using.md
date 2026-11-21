@@ -317,7 +317,8 @@ are filled where `metrics[].has_sides` is true: ratio metrics (their two input
 metrics) and averages (the sum and the row count). `metrics[].time_aggregation`
 says how each metric combines over time:
 
-- `sum`; `end_of_period` (a stock: MRR, open pipeline — take the last day);
+- `sum`; `end_of_period` (a stock: MRR, open pipeline, the retail
+  `customer_base`, the wholesale `trade_inventory_build` — take the last day);
 - `ratio_of_sums`: sum `numerator` and `denominator`, then divide (never
   average daily ratios); `average` works the same way from its sides;
 - `ratio_of_aggregates`: a ratio with a side that is not a sum.

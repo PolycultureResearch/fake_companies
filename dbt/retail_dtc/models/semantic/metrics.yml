@@ -49,6 +49,18 @@ metrics:
         name: new_customers
         fill_nulls_with: 0
 
+  - name: customer_base
+    description: >-
+      Customers acquired to date: the running total of new customers since
+      the data starts (a stock: over a week or a month take the last day).
+      Repeat orders come from this base.
+    type: cumulative
+    label: Customer Base
+    type_params:
+      measure:
+        name: new_customers
+        fill_nulls_with: 0
+
   - name: returning_customer_orders
     description: Orders from existing customers (repeat purchases).
     type: simple
@@ -111,6 +123,15 @@ metrics:
     type_params:
       measure:
         name: discounts
+        fill_nulls_with: 0
+
+  - name: discounted_orders
+    description: Orders that got a promo discount (discount_amount above zero).
+    type: simple
+    label: Discounted Orders
+    type_params:
+      measure:
+        name: discounted_orders
         fill_nulls_with: 0
 
   - name: refunds

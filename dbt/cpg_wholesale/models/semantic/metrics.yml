@@ -78,3 +78,18 @@ metrics:
     type_params:
       numerator: wholesale_net_revenue
       denominator: shipped_cases
+
+  - name: trade_inventory_build
+    description: >-
+      Retail inventory built since the data starts, in units: everything
+      shipped to retailers and distributors less everything their shoppers
+      bought (a stock: over a week or a month take the last day). The opening
+      stock is unknown, so this is the change from it; negative means
+      retailers destocked. Shipments replenish last week's sales, so a drop in
+      consumer demand builds inventory for about a week before orders follow.
+    type: cumulative
+    label: Trade Inventory Build
+    type_params:
+      measure:
+        name: net_inventory_units
+        fill_nulls_with: 0

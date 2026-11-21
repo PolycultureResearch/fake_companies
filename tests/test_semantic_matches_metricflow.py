@@ -75,6 +75,96 @@ def test_every_dbt_metric_is_computed(vertical):
     assert SemanticLayer.for_vertical(get_vertical(vertical)).unsupported() == {}
 
 
+def test_every_vertical_but_b2b_has_a_stock_tree_nodes_can_bind():
+    """Retail and wholesale gained a stock each (eval-worlds spec 10.3); a
+    tree there can now have a stock node. Both are running totals."""
+    expect = {
+        "b2c_saas": {"mrr", "active_subscriptions"},
+        "b2b_services": None,  # unchanged: open pipeline and open deals
+        "retail_dtc": {"customer_base"},
+        "cpg_wholesale": {"trade_inventory_build"},
+    }
+    for name, stocks in expect.items():
+        vertical = get_vertical(name)
+        assert vertical.stock_metrics(), name
+        if stocks is not None:
+            assert stocks <= vertical.stock_metrics(), name
+    for name, metric in [
+        ("retail_dtc", "customer_base"),
+        ("cpg_wholesale", "trade_inventory_build"),
+    ]:
+        layer = SemanticLayer.for_vertical(get_vertical(name))
+        m = layer.metrics[metric]
+        assert (m.kind, m.window_days, m.measure.agg) == ("cumulative", None, "sum")
+
+
+def test_a_running_total_needs_an_additive_measure(tmp_path):
+    import shutil
+
+    import yaml
+
+    project = tmp_path / "retail_dtc"
+    shutil.copytree(ROOT / "dbt" / "retail_dtc" / "models", project / "models")
+    path = project / "models" / "semantic" / "semantic_models.yml"
+    sm = yaml.safe_load(path.read_text())
+    customers = next(m for m in sm["semantic_models"] if m["name"] == "customers")
+    customers["measures"][0]["agg"] = "count_distinct"
+    customers["measures"][0]["expr"] = "customer_id"
+    path.write_text(yaml.safe_dump(sm))
+    layer = SemanticLayer(project)
+    assert "count_distinct" in layer.unsupported()["customer_base"]
+
+
+def test_new_retail_and_wholesale_metrics_from_the_rows():
+    """discounted_orders, customer_base and trade_inventory_build recomputed
+    from the raw frames, independently of the dbt SQL."""
+    cfg = load_config(ROOT / "configs" / "smoke_retail_90d.yaml")
+    result = generate(cfg, anomalies="none")  # no duplicate rows to dedupe
+    layer = SemanticLayer.for_vertical(get_vertical(cfg.company.vertical))
+    series = layer.series(
+        result.frames,
+        result.tables,
+        result.calendar,
+        metrics=["discounted_orders", "customer_base"],
+    )
+    totals = series[series["dimension"].isna()].pivot(index="date", columns="metric", values="v")
+    orders = result.frames["shop_db.orders"]
+    day = pd.to_datetime(orders["placed_at"]).dt.normalize()
+    discounted = (orders["discount_amount"] > 0).groupby(day).sum()
+    assert discounted.sum() > 0
+    assert (totals["discounted_orders"].reindex(discounted.index) == discounted).all()
+    customers = result.frames["shop_db.customers"]
+    created = pd.to_datetime(customers["created_at"]).dt.normalize().value_counts().sort_index()
+    base = created.cumsum().reindex(totals.index).ffill().fillna(0)
+    assert (totals["customer_base"] == base).all()
+    assert totals["customer_base"].is_monotonic_increasing
+
+    cfg = load_config(ROOT / "configs" / "smoke_cpg_90d.yaml")
+    result = generate(cfg, anomalies="none")  # no duplicate rows to dedupe
+    layer = SemanticLayer.for_vertical(get_vertical(cfg.company.vertical))
+    inv = layer.series(
+        result.frames, result.tables, result.calendar, metrics=["trade_inventory_build"]
+    )
+    inv = inv[inv["dimension"].isna()].set_index("date")["v"]
+    scans = result.frames["pos.scan_sales"]
+    ships = result.frames["erp.shipments"].merge(
+        result.frames["erp.products"][["product_id", "case_size"]], on="product_id"
+    )
+    weeks = pd.to_datetime(scans["week_start"])
+    first, last = weeks.min(), weeks.max() + pd.Timedelta(days=6)
+    shipped_day = pd.to_datetime(ships["shipped_at"]).dt.normalize()
+    keep = shipped_day.between(first, last)
+    sell_in = (ships["cases"] * ships["case_size"])[keep].groupby(shipped_day[keep]).sum()
+    per_day = scans.groupby(weeks)["units"].sum() / 7
+    sell_through = (
+        pd.concat([per_day.rename(lambda d, k=k: d + pd.Timedelta(days=k)) for k in range(7)])
+        .groupby(level=0)
+        .sum()
+    )
+    flows = sell_in.reindex(inv.index, fill_value=0) - sell_through.reindex(inv.index, fill_value=0)
+    assert np.allclose(inv.to_numpy(), flows.cumsum().to_numpy(), rtol=1e-9, atol=1e-6)
+
+
 @pytest.mark.slow
 @pytest.mark.skipif(not _available, reason="dbt extra / mf not installed")
 @pytest.mark.parametrize("config_name", SMOKES)

@@ -262,6 +262,7 @@ Ordered by what Breakdown's evaluation needs next. Each is its own change.
    there cannot have a stock node); weekly and monthly distinct counts
    (`active_subscriptions`, `dau` at a coarser grain are not derivable from
    the daily series — a second, coarser-grain series file would answer them).
+   *Done 2026-11-20 except monthly distinct counts: §10.2 and §10.3.*
 7. **Blind sets.** A `worlds --blind` layout that writes ground truth and
    effects to a separate directory, so an agent can be handed the data alone.
 
@@ -982,6 +983,66 @@ the trailing week that the period actually covers, which is what a week-grain
 WAU should mean, so the manifest is unchanged. But it is not MetricFlow's
 number: a consumer matching MetricFlow exactly takes the first day. The same
 holds for the cumulative stocks added in §10.3. Monthly grain is not built.
+
+### 10.3 Metrics the trees needed: discounted orders, and a stock in retail and wholesale
+
+Pulled forward from phase 2 item 6. Each is a dbt metric in the vertical's
+semantic layer, so it is in every world's series file, the effects tables and
+`worlds.json` like any other, and `tests/test_semantic_matches_metricflow.py`
+holds it to `mf query` (totals and every slice).
+
+| Vertical | Metric | Definition | Kind |
+|---|---|---|---|
+| retail_dtc | `discounted_orders` | orders with `discount_amount > 0` (a measure on `fct_orders`) | flow, `sum` |
+| retail_dtc | `customer_base` | customers acquired to date: the running total of the `new_customers` measure | stock (cumulative, no window) |
+| cpg_wholesale | `trade_inventory_build` | units shipped into retail less units sold through, summed from the first scanned week (new mart `fct_inventory_flows`) | stock (cumulative, no window) |
+
+**Why these stocks.**
+
+- *Retail: the customer base.* It is the stock that repeat orders are drawn
+  from, which is how Alpenglow's tree already uses it (it bound its own SQL
+  for `customer_base`; it can now use the metric of the same name). It is a
+  level that only grows, and an acquisition anomaly (spend cut, checkout bug)
+  leaves it permanently lower by the customers not acquired. Active customers
+  in a trailing year were the alternative, but on a two-year timeline that
+  window is not full for the first year, so the level would mostly measure
+  the start of the data.
+- *Wholesale: retail inventory, as a build.* Sell-in (shipments) less
+  sell-through (POS) is the stock a CPG analyst watches between those two
+  flows, and it gives the tree an exact identity: shipped units = POS units +
+  the change in inventory. The generator does not model retailer stock: each
+  account reorders last week's sales. So the opening level is unknown and the
+  metric is the build *since the data starts*, zero on the first scanned
+  day, negative when retailers destock. Two consequences are documented on
+  the metric: orders replenish last week's sales without correcting for
+  stock on hand, so the level drifts like a random walk (on Bristlecone it
+  ends about a week of sales above where it started); and a demand anomaly
+  builds inventory for about a week before orders follow, then holds that
+  level, which is the replenishment lag seen as a stock. An absolute level
+  would need an opening stock the data does not contain; a constant would
+  only hide that.
+- *POS is spread over its week.* The POS feed reports a week of units on
+  its Monday. Taken as is, the daily balance would drop by a week of sales
+  every Monday and climb back as the shipments land; spread evenly over the
+  seven days it is a level a daily model can read. Shipments outside the
+  scanned weeks are left out so both sides cover the same days; after the
+  last scanned week the level stays where it was.
+
+**How cumulative metrics without a window are computed.** `semantic.py`
+already evaluated windowed cumulative metrics (`wau`). A cumulative metric
+with no window is MetricFlow's running total since the data starts; it is
+now supported for additive measures (`sum`, `count`, `sum_boolean`), by
+adding up day totals, and refused by name for anything else (a running
+distinct count is not a sum of days). Both stocks are in the verticals'
+`STOCK_METRICS`, so the manifest says `time_aggregation: end_of_period`.
+
+**Not added to the declared `affected_metrics`.** `customer_base` moves
+whenever `new_customers` does, and `trade_inventory_build` whenever POS or
+shipments do, but the declared map was left alone: adding them changes
+`meta.ground_truth` in the default output of the retail and CPG configs,
+which is Devon's call, as it was for §8's corrections. Their measured effects
+(`metrics_moved`, the verdicts) are there regardless. `discounted_orders`
+moves only while a promotion runs, so no driver declares it.
 
 ---
 
