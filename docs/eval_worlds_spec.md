@@ -938,6 +938,51 @@ nothing is established at any level) and `seeds_to_establish_column`.
   runner needs to plan a bigger set is the projected count per target, which
   depends on that target's effect and spread.
 
+### 10.2 Weekly distinct counts
+
+Pulled forward from phase 2 item 6, week grain only.
+
+**The problem.** A `count_distinct` metric counts distinct entities per day.
+MetricFlow at week grain counts them over the week, which the days cannot
+give: DAU summed over a week counts a user once per active day, and the
+last day's active subscriptions miss every subscription that ended earlier
+in the week. The runner was serving these at week grain from last-day counts.
+
+**Design.** Every world whose vertical has such a metric gets
+`<world>.weekly_series.parquet`: `date` (the Monday that starts the week, as
+MetricFlow labels `metric_time__week`), `metric`, `dimension`, `value`,
+`metric_value`, `days`. It holds every simple `count_distinct` metric
+(`SemanticLayer.weekly_metrics`): in B2C `dau`, `paying_active_users` and
+`active_subscriptions`; no other vertical has one. Totals and every
+single-dimension slice, as in the daily file. Every week that overlaps the
+timeline is present, a week with no rows at the metric's fill. `days` is the
+number of timeline days in the week, fewer than 7 only at the two edges,
+where the count covers just the days that exist (as MetricFlow's does); drop
+those weeks if a partial week would mislead.
+
+Manifest: `worlds[].weekly_series` (the path, null when the vertical has no
+such metric or series are off) and `metrics[].has_weekly_series`.
+
+`active_subscriptions` is both a stock (`time_aggregation: end_of_period`,
+the last day's count) and in the weekly file (distinct subscriptions active
+on any day of the week). They answer different questions; the weekly file
+is MetricFlow's number.
+
+**Verified against MetricFlow** in `tests/test_semantic_matches_metricflow.py`:
+for each distinct-count metric, `mf query --group-by metric_time__week`, the
+total and every single-dimension slice, equal to the file on every week.
+
+**Not in the file, and why.** `wau` is a cumulative metric (a trailing
+7-day distinct count, computed daily). MetricFlow 0.13 answers it at week
+grain with its value on the *first* day of the week (`FIRST_VALUE` over the
+week: the seven days ending that Monday, mostly the previous week). That is
+already in the daily series, so it needs no file. Note the mismatch with the
+manifest, which says `rolling_window`: take the *last* day. The last day is
+the trailing week that the period actually covers, which is what a week-grain
+WAU should mean, so the manifest is unchanged. But it is not MetricFlow's
+number: a consumer matching MetricFlow exactly takes the first day. The same
+holds for the cumulative stocks added in §10.3. Monthly grain is not built.
+
 ---
 
 *This document is written and maintained by an AI agent (Claude), with human oversight.*

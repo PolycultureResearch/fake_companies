@@ -58,6 +58,7 @@ _AGGS = {
 }
 NULL_VALUE = "(null)"  # how a NULL dimension value is spelled in a series
 SERIES_COLUMNS = ["date", "metric", "dimension", "value", "v", "numerator", "denominator"]
+WEEKLY_COLUMNS = ["date", "metric", "dimension", "value", "v", "days"]
 
 
 class UnsupportedSemantics(ValueError):
@@ -550,6 +551,84 @@ class SemanticLayer:
                 out.append(df)
         if not out:
             return pd.DataFrame(columns=SERIES_COLUMNS)
+        res = pd.concat(out, ignore_index=True)
+        res["date"] = pd.to_datetime(res["date"])
+        return res
+
+    def weekly_metrics(self) -> list[str]:
+        """Metrics whose weekly value is not derivable from their daily series.
+
+        A simple ``count_distinct`` metric counts distinct entities per day;
+        MetricFlow at week grain counts them over the whole week (DAU summed
+        is not WAU, and active subscriptions on the last day are not the
+        subscriptions active at some point in the week). These get a weekly
+        series of their own (:meth:`weekly_series_from`). Cumulative metrics
+        are not among them: MetricFlow's weekly value of one is its value on
+        a day of the week, which the daily series already carries.
+        """
+        return sorted(
+            name
+            for name, m in self.metrics.items()
+            if m.kind == "simple" and m.measure is not None and m.measure.agg == "count_distinct"
+        )
+
+    def weekly_series_from(
+        self,
+        con: duckdb.DuckDBPyConnection,
+        cal: Calendar,
+        dimension_sets: list[tuple[str, ...]] | None = None,
+    ) -> pd.DataFrame:
+        """Week-grain series of :meth:`weekly_metrics`, as MetricFlow's
+        ``metric_time__week`` returns them, long format.
+
+        Columns: ``date`` (the Monday that starts the week, as MetricFlow
+        labels it), ``metric``, ``dimension``, ``value``, ``v``, and ``days``,
+        the number of timeline days in that week (7 except at the timeline's
+        edges, where the week holds only the days that exist). Every week
+        that overlaps the timeline is present; a week with no rows carries
+        the metric's ``fill_nulls_with``.
+        """
+        import pandas as pd
+
+        start, end = cal.start.isoformat(), cal.end.isoformat()
+        con.execute(
+            "CREATE OR REPLACE TEMP TABLE _weeks AS SELECT CAST(date_trunc('week', d) AS DATE) "
+            "AS w, count(*) AS days FROM (SELECT CAST(unnest(generate_series("
+            f"DATE '{start}', DATE '{end}', INTERVAL 1 DAY)) AS DATE) AS d) GROUP BY 1"
+        )
+        out: list[pd.DataFrame] = []
+        for dims in dict.fromkeys([(), *(tuple(d) for d in dimension_sets or [])]):
+            for name in self.weekly_metrics():
+                if any(d not in self.dimensions(name) for d in dims):
+                    continue
+                metric = self.metrics[name]
+                m = metric.measure
+                gsel = "".join(
+                    f", coalesce(CAST({m.dimensions[d]} AS VARCHAR), '{NULL_VALUE}') AS g{i}"
+                    for i, d in enumerate(dims)
+                )
+                gcols = "".join(f", g{i}" for i in range(len(dims)))
+                t = f"CAST({m.time_expr} AS DATE)"
+                sparse = (
+                    f"SELECT CAST(date_trunc('week', {t}) AS DATE) AS w{gsel}, "
+                    f"{_AGGS[m.agg].format(e=m.expr)} AS v FROM dbt.{m.relation} "
+                    f"WHERE {t} BETWEEN DATE '{start}' AND DATE '{end}' GROUP BY ALL"
+                )
+                grid = "_weeks"
+                if dims:
+                    grid = f"_weeks CROSS JOIN (SELECT DISTINCT {gcols[2:]} FROM x)"
+                v = "x.v" if metric.fill is None else f"coalesce(x.v, {metric.fill!r})"
+                value = " || ',' || ".join(f"g{i}" for i in range(len(dims))) if dims else "NULL"
+                df = con.execute(
+                    f"WITH x AS ({sparse}) SELECT w AS date, CAST({value} AS VARCHAR) AS value, "
+                    f"CAST({v} AS DOUBLE) AS v, days FROM {grid} "
+                    f"LEFT JOIN x USING (w{gcols}) ORDER BY 1, 2"
+                ).df()
+                df.insert(1, "metric", name)
+                df.insert(2, "dimension", ",".join(dims) if dims else None)
+                out.append(df)
+        if not out:
+            return pd.DataFrame(columns=WEEKLY_COLUMNS)
         res = pd.concat(out, ignore_index=True)
         res["date"] = pd.to_datetime(res["date"])
         return res

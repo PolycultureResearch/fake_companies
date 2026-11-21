@@ -8,6 +8,8 @@ and requires the same numbers. It also checks every single-dimension slice
 that goes into a world's ``series.parquet`` (one MetricFlow query per
 dimension id), the two sides of every ratio metric, and one two-dimension
 query: the root metric of the smoke anomaly, grouped by its root dimensions.
+Distinct-count metrics are also checked at week grain (``metric_time__week``),
+total and by each dimension, against the weekly series file's numbers.
 
 Requires the dbt extra (skipped otherwise).
 """
@@ -37,7 +39,12 @@ SMOKES = ["smoke_90d", "smoke_retail_90d", "smoke_b2b_90d", "smoke_cpg_90d"]
 
 
 def _mf(
-    dbt_dir: Path, env: dict, metrics: list[str], group_by: list[str], out: Path
+    dbt_dir: Path,
+    env: dict,
+    metrics: list[str],
+    group_by: list[str],
+    out: Path,
+    grain: str = "day",
 ) -> pd.DataFrame:
     proc = subprocess.run(
         [
@@ -46,7 +53,7 @@ def _mf(
             "--metrics",
             ",".join(metrics),
             "--group-by",
-            ",".join(["metric_time__day", *group_by]),
+            ",".join([f"metric_time__{grain}", *group_by]),
             "--csv",
             str(out),
         ],
@@ -58,8 +65,8 @@ def _mf(
         check=False,
     )
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
-    df = pd.read_csv(out, parse_dates=["metric_time__day"])
-    return df.rename(columns={"metric_time__day": "date"})
+    df = pd.read_csv(out, parse_dates=[f"metric_time__{grain}"])
+    return df.rename(columns={f"metric_time__{grain}": "date"})
 
 
 @pytest.mark.parametrize("vertical", sorted(REGISTRY))
@@ -186,6 +193,44 @@ def test_series_match_metricflow(config_name, tmp_path):
             assert ok.all(), f"{config_name}: {name} by {dim} differs on {int((~ok).sum())} rows"
             checked += 1
     assert checked >= len(by_id)
+
+    # --- weekly distinct counts: MetricFlow's metric_time__week ------------ #
+    weekly_names = layer.weekly_metrics()
+    if not weekly_names:
+        return
+    con = layer.build_marts(result.frames, result.tables)
+    try:
+        weekly = layer.weekly_series_from(con, result.calendar, singles)
+    finally:
+        con.close()
+    first_week = lo - pd.Timedelta(days=lo.dayofweek)
+    groups: dict[tuple[str, ...], list[str]] = {(): weekly_names}
+    for n in weekly_names:
+        for dim, mf_id in layer.dimensions(n).items():
+            if mf_id:
+                groups.setdefault((dim, mf_id), []).append(n)
+    for i, (key, group) in enumerate(groups.items()):
+        dims, ids = key[:1], list(key[1:])
+        theirs = _mf(dbt_dir, env, group, ids, tmp_path / f"week{i}.csv", grain="week")
+        theirs = theirs[(theirs["date"] >= first_week) & (theirs["date"] <= hi)]
+        theirs["value"] = theirs[ids[0]].map(_spell) if ids else None
+        label = dims[0] if dims else None
+        mine_w = weekly[
+            weekly["dimension"].isna() if label is None else weekly["dimension"] == label
+        ]
+        for name in group:
+            ours = mine_w[mine_w["metric"] == name][["date", "value", "v"]]
+            on = ["date", "value"] if ids else ["date"]
+            joined = theirs[[*on, name]].merge(ours, on=on, how="outer")
+            a = joined["v"].to_numpy(dtype=float)
+            b = joined[name].to_numpy(dtype=float)
+            ok = np.isclose(a, b, rtol=1e-9, atol=1e-9, equal_nan=True)
+            # a week (or slice value) MetricFlow has no row for: ours is the fill
+            ok |= np.isnan(b) & ((a == 0.0) | np.isnan(a))
+            assert ok.all(), (
+                f"{config_name}: weekly {name} by {dims or 'total'} differs from MetricFlow "
+                f"on {int((~ok).sum())} rows"
+            )
 
 
 def _spell(value) -> str:

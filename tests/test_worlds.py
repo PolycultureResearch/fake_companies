@@ -142,7 +142,53 @@ def test_stocks_and_windows_are_marked_in_the_manifest(tmp_path):
     world = manifest.worlds[0]
     assert world.path is None and world.series == "baseline/s0/null.series.parquet"
     files = sorted(p.name for p in (tmp_path / "baseline" / "s0").iterdir())
-    assert files == ["null.ground_truth.json", "null.run_manifest.json", "null.series.parquet"]
+    assert files == [
+        "null.ground_truth.json",
+        "null.run_manifest.json",
+        "null.series.parquet",
+        "null.weekly_series.parquet",
+    ]
+
+
+def test_distinct_counts_have_a_weekly_series(tmp_path):
+    """DAU summed over a week is not the week's distinct users, and active
+    subscriptions on Sunday are not the subscriptions active during the week:
+    those weekly numbers come from their own file (MetricFlow's
+    metric_time__week; tests/test_semantic_matches_metricflow.py holds it to
+    mf query)."""
+    manifest = build_world_set(
+        REPO_ROOT / "configs" / "smoke_90d.yaml", tmp_path, seeds=[0], null=True, raw=False
+    )
+    weekly_names = {m.name for m in manifest.metrics if m.has_weekly_series}
+    assert weekly_names == {"active_subscriptions", "dau", "paying_active_users"}
+    world = manifest.worlds[0]
+    assert world.weekly_series == "baseline/s0/null.weekly_series.parquet"
+    weekly = pd.read_parquet(tmp_path / world.weekly_series)
+    assert list(weekly.columns) == ["date", "metric", "dimension", "value", "metric_value", "days"]
+    weekly["date"] = pd.to_datetime(weekly["date"])
+    assert (weekly["date"].dt.dayofweek == 0).all(), "weeks start on Monday, as MetricFlow's"
+    totals = weekly[weekly["dimension"].isna()]
+    assert set(totals["metric"]) == weekly_names
+    by_name = {m.name: m for m in manifest.metrics}
+    listed = {(n, d) for n in weekly_names for d in by_name[n].dimensions}
+    sliced = weekly[weekly["dimension"].notna()]
+    assert set(zip(sliced["metric"], sliced["dimension"])) == listed
+    # every timeline day falls in exactly one week
+    per_week = totals[totals["metric"] == "dau"].set_index("date")
+    assert per_week["days"].sum() == 90 and per_week["days"].between(1, 7).all()
+
+    daily = pd.read_parquet(tmp_path / world.series)
+    daily = daily[daily["dimension"].isna()].copy()
+    daily["date"] = pd.to_datetime(daily["date"])
+    daily["week"] = daily["date"] - pd.to_timedelta(daily["date"].dt.dayofweek, unit="D")
+    for name in weekly_names:
+        days = daily[daily["metric"] == name].groupby("week")["metric_value"]
+        week = totals[totals["metric"] == name].set_index("date")["metric_value"]
+        # distinct over the week: at least the busiest day, at most the days added up
+        assert (week >= days.max().reindex(week.index)).all(), name
+        assert (week <= days.sum().reindex(week.index)).all(), name
+    dau = totals[totals["metric"] == "dau"].set_index("date")["metric_value"]
+    assert (dau < daily[daily["metric"] == "dau"].groupby("week")["metric_value"].sum()).any()
 
 
 def test_every_world_has_a_series_file(retail_set):

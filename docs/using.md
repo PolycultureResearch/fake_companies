@@ -218,6 +218,7 @@ out/worlds/alpenglow/
   baseline/s0/null.ground_truth.json            # []
   baseline/s0/null.run_manifest.json
   baseline/s0/null.series.parquet               # every world has one
+  baseline/s0/null.weekly_series.parquet        # B2C only: distinct counts by week
   baseline/s0/only.paid_social_budget_cut/
   baseline/s0/only.paid_social_budget_cut.ground_truth.json
   baseline/s0/only.paid_social_budget_cut.run_manifest.json
@@ -326,14 +327,28 @@ says how each metric combines over time:
 - `derived`: aggregate each input by `input_time_aggregation`, then evaluate
   `formula`, a tree of `{"metric"}`, `{"const"}` and `{"op", "args"}` nodes
   (`+ - * /`, `neg`, `nullif_zero`); `expr` is the same thing as SQL text;
-- `count_distinct` (DAU) and `rolling_window` (WAU): not derivable for a
-  longer period from the days.
+- `count_distinct` (DAU): not derivable for a longer period from the days;
+  the week is in the weekly series file (below). `rolling_window` (WAU): a
+  trailing window already, take the last day.
 
 `metrics[].measure_agg` is the measure's own aggregation. A stock with
 `measure_agg: count_distinct` (`active_subscriptions`) is the distinct count
 on each day; its end-of-week value is the last day's count, which is not what
-MetricFlow returns at week grain (distinct over the whole week). The series
-file cannot answer that number.
+MetricFlow returns at week grain (distinct over the whole week).
+
+**`*.weekly_series.parquet`** answers those numbers. For every metric with
+`metrics[].has_weekly_series` (the simple `count_distinct` ones: `dau`,
+`paying_active_users`, `active_subscriptions` in B2C; other verticals have
+none and their worlds have no such file) it holds MetricFlow's
+`metric_time__week` value: `date` (the Monday starting the week), `metric`,
+`dimension`, `value`, `metric_value`, and `days`, the timeline days in that
+week (under 7 only at the timeline's two edges, where the count covers the
+days that exist). Totals and every single-dimension slice. The path is
+`worlds[].weekly_series`.
+
+A cumulative metric (`wau`, `rolling_window`) is a trailing window already;
+over a week take the last day. MetricFlow 0.13 instead returns its value on
+the week's *first* day; both are in the daily series.
 
 **Read the measured numbers as effect plus noise.** A single world and its null
 twin share a seed, but most entity builders draw for the whole timeline from one

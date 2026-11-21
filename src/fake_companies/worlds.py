@@ -17,6 +17,7 @@ Layout under the output directory::
     <regime>/s<seed>/null.ground_truth.json
     <regime>/s<seed>/null.run_manifest.json
     <regime>/s<seed>/null.series.parquet            (every world has one)
+    <regime>/s<seed>/null.weekly_series.parquet     (when the vertical has distinct counts)
     <regime>/s<seed>/only.<anomaly>.duckdb          (+ the same two sidecars)
     <regime>/s<seed>/only.<anomaly>.effects.parquet
     <regime>/s<seed>/only.<anomaly>.effects_summary.parquet
@@ -89,6 +90,12 @@ class WorldEntry(BaseModel):
     # denominator — the daily series of every metric, total and by each
     # single dimension, as MetricFlow would return them.
     series: str | None = None
+    # Every world, when some metric has ``has_weekly_series``: date (the
+    # Monday starting the week), metric, dimension, value, metric_value, days
+    # — MetricFlow's metric_time__week value of each distinct-count metric,
+    # total and by each single dimension. ``days`` is the number of timeline
+    # days in the week (fewer than 7 only at the timeline's edges).
+    weekly_series: str | None = None
 
 
 class MetricInfo(BaseModel):
@@ -107,8 +114,13 @@ class MetricInfo(BaseModel):
     # count_distinct, average, ...); None for ratio and derived metrics. A
     # stock that is a count_distinct (active_subscriptions) is the distinct
     # count on each day: its end-of-period value is the count on the last
-    # day, which is NOT MetricFlow's weekly number (distinct over the week).
+    # day, which is NOT MetricFlow's weekly number (distinct over the week);
+    # that number is in the weekly series file (``has_weekly_series``).
     measure_agg: str | None = None
+    # Whether each world's ``weekly_series`` file carries this metric: true
+    # for every simple count_distinct metric, whose week value cannot be
+    # derived from its days.
+    has_weekly_series: bool = False
     # ratio: {"numerator": metric, "denominator": metric}; derived: the
     # alias -> metric inputs of ``expr``. Empty otherwise.
     inputs: dict[str, str] = Field(default_factory=dict)
@@ -366,6 +378,23 @@ def _write_series(series, path: Path) -> None:
         con.close()
 
 
+def _write_weekly_series(weekly, path: Path) -> None:
+    """One world's week-grain distinct counts: totals and single-dimension slices."""
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        con.register("_weekly", weekly)
+        con.execute(
+            "COPY (SELECT CAST(date AS DATE) AS date, metric, dimension, value, "
+            "v AS metric_value, CAST(days AS INTEGER) AS days FROM _weekly "
+            "ORDER BY metric, dimension NULLS FIRST, value NULLS FIRST, date) "
+            f"TO '{path}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+    finally:
+        con.close()
+
+
 def _write_twin_summary(summary, path: Path) -> None:
     import duckdb
 
@@ -426,7 +455,7 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
     null_series = None
     for plan in job["plans"]:
         result = generate(cfg, seed=seed, anomalies=plan.selection)
-        con = effects_rel = series_rel = summary_rel = None
+        con = effects_rel = series_rel = summary_rel = weekly_rel = None
         try:
             twin = job["effects"] and plan.kind in ("null", "single")
             if twin or job["series"]:
@@ -441,6 +470,10 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
             if job["series"]:
                 series_rel = (rel_dir / f"{plan.stem}.series.parquet").as_posix()
                 _write_series(series, out_dir / series_rel)
+                if layer.weekly_metrics():
+                    weekly = layer.weekly_series_from(con, result.calendar, singles_dims)
+                    weekly_rel = (rel_dir / f"{plan.stem}.weekly_series.parquet").as_posix()
+                    _write_weekly_series(weekly, out_dir / weekly_rel)
             if twin and plan.kind == "null":
                 null_series = series
             elif twin:
@@ -498,6 +531,7 @@ def _build_group(job: dict[str, Any]) -> dict[str, Any]:
                 effects=effects_rel,
                 effects_summary=summary_rel,
                 series=series_rel,
+                weekly_series=weekly_rel,
             ).model_dump(mode="json")
         )
     return out
@@ -658,6 +692,7 @@ def build_world_set(
                 type=layer.metrics[name].kind,
                 fill_nulls_with=layer.fill_value(name),
                 dimensions=layer.dimensions(name),
+                has_weekly_series=series and name in layer.weekly_metrics(),
                 **_metric_inputs(layer, name, stocks),
             )
             for name in sorted(layer.metrics)
