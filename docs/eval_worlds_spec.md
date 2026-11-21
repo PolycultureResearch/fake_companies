@@ -242,6 +242,8 @@ Ordered by what Breakdown's evaluation needs next. Each is its own change.
    `examples/`, each with at least one rate, one stock, one node with a learned
    parent, one formula node and one sliceable dimension.
    `scripts/verify_consumers.py` checks every metric the tree binds exists.
+   *Done 2026-11-20: `docs/canonical_trees.md`, with the scenarios they are
+   asked about planted in the demo configs.*
 3. **Anomaly shapes.**
    - *Off-tree:* a driver change whose `root_metric` is deliberately absent
      from the canonical tree. Ground truth marks it `off_tree: true`.
