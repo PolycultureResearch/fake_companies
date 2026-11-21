@@ -1215,6 +1215,49 @@ is summarized.** Reasons:
 An open-ended anomaly (`end` null) uses the timeline's last day as `b` for
 its declared window.
 
+### 10.8 A learned child with several moved parents (assessed, not built)
+
+**The gap.** When one anomaly moves several parents of a node whose edges
+are learned, nothing in a set says how much of the child's change came
+through each parent, so the runner refuses to score those edges.
+
+**What a split would mean.** "The part of the child's change due to parent
+P1" is a path-specific effect: the child as it would be if P1 moved and P2
+stayed at its null value. It is defined only relative to the mechanism that
+produces the child. The tree's learned edges are a statistical model of
+that mechanism, not the mechanism; the generator's mechanism is its entity
+builders.
+
+**Case 1: one anomaly moves several parents (the case the runner hits).**
+The generator cannot measure a split. An anomaly multiplies one latent
+driver, which one entity builder reads; the parents diverge *downstream* of
+it, because they are computed from the same rows (a spend cut thins the
+sessions table, and paid sessions, signups and trials are all counts over
+that one table). A world in which P1 sees the anomaly and P2 does not would
+need two different sessions tables in one company: not a coherent
+realization. Making it possible means routing the anomaly per consumer of
+each table, i.e. rebuilding the entity layer as per-metric structural
+equations. That is a rewrite of every vertical's builders, larger than
+§9.5's layer 2, and it would still answer for the generator's mechanism
+rather than the tree's. The runner's refusal is the right behaviour, and
+what can be scored instead is the child's total effect and each parent's
+own effect, both of which the sets have.
+
+**Case 2: separate anomalies move separate parents.** Here the split is
+well defined and measurable with worlds the generator can already make.
+With anomalies A (moving P1) and B (moving P2), the worlds null, only A,
+only B and A plus B give, per seed, the exact two-player Shapley split of
+the child's change (A's share is the mean of its effect alone and its
+marginal effect given B). `generate --anomalies only:A,B` already builds the
+fourth world; what is missing is a `worlds` option that plans it (for
+example `--combos A+B`) and a summary that writes the split. Cost: one
+extra world per pair per seed (2^k − k − 1 for k anomalies), and since
+each world adds realization noise (§9.3), the split needs as many seeds as
+the effects themselves. Which scripted pairs (if any) hit two parents of
+one learned node depends on the tree, so a config that plants such a pair
+may be needed too. Not built: the runner's refused edges are case 1, which
+this would not help.
+
 ---
 
 *This document is written and maintained by an AI agent (Claude), with human oversight.*
