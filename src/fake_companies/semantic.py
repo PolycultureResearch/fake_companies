@@ -461,6 +461,50 @@ class SemanticLayer:
             return "count_distinct"
         return agg  # min | max
 
+    def metricflow_week(self, name: str) -> str:
+        """How MetricFlow (0.13, the version the tests pin) computes this
+        metric at ``metric_time__week``, which is not always how its daily
+        values should combine (:meth:`time_aggregation`):
+
+        - ``sum_of_days``: a ``sum`` / ``count`` / ``sum_boolean`` measure,
+          summed over the week's rows. Also for a stock: MetricFlow does not
+          know MRR is a level and adds seven days of it;
+        - ``average_of_rows``: an ``average`` measure over the week's rows;
+        - ``distinct_over_week``: a ``count_distinct`` measure over the
+          week's rows (the weekly series file);
+        - ``min_over_week`` / ``max_over_week``;
+        - ``first_day``: a cumulative metric takes its value on the week's
+          first day (``FIRST_VALUE``), for a trailing window the seven days
+          ending that Monday;
+        - ``ratio_of_week_inputs`` / ``derived_of_week_inputs``: computed
+          from its inputs' own week values.
+        """
+        metric = self.metrics[name]
+        if metric.kind == "ratio":
+            return "ratio_of_week_inputs"
+        if metric.kind == "derived":
+            return "derived_of_week_inputs"
+        if metric.kind == "cumulative":
+            return "first_day"
+        return {
+            "sum": "sum_of_days",
+            "count": "sum_of_days",
+            "sum_boolean": "sum_of_days",
+            "average": "average_of_rows",
+            "count_distinct": "distinct_over_week",
+            "min": "min_over_week",
+            "max": "max_over_week",
+        }[metric.measure.agg]  # type: ignore[union-attr]
+
+    def matches_metricflow_week(self, name: str, stocks: frozenset[str] = frozenset()) -> bool:
+        """Whether aggregating the daily series by :meth:`time_aggregation`
+        gives MetricFlow's week value (:meth:`metricflow_week`)."""
+        metric = self.metrics[name]
+        if metric.kind in ("ratio", "derived"):
+            return all(self.matches_metricflow_week(m, stocks) for m in metric.inputs.values())
+        ours, theirs = self.time_aggregation(name, stocks), self.metricflow_week(name)
+        return (ours, theirs) in {("sum", "sum_of_days"), ("average", "average_of_rows")}
+
     def fill_value(self, name: str) -> float | None:
         """What a day with no rows is worth: the metric's ``fill_nulls_with``.
 

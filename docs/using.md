@@ -371,6 +371,15 @@ A cumulative metric (`wau`, `rolling_window`) is a trailing window already;
 over a week take the last day. MetricFlow 0.13 instead returns its value on
 the week's *first* day; both are in the daily series.
 
+`time_aggregation` is how a metric's days *should* combine, and it is not
+always what `mf query --group-by metric_time__week` returns. Each metric says
+both: `metrics[].metricflow_week` is MetricFlow's rule (`sum_of_days`,
+`average_of_rows`, `distinct_over_week`, `first_day`, `ratio_of_week_inputs`,
+`derived_of_week_inputs`, `min_over_week`, `max_over_week`) and
+`matches_metricflow_week` says whether the two agree. They do not for stocks
+(MetricFlow adds up seven days of MRR), distinct counts, cumulative metrics,
+and ratios or formulas built on any of those.
+
 **Read the measured numbers as effect plus noise.** A single world and its null
 twin share a seed, but most entity builders draw for the whole timeline from one
 stream, so the two realizations differ beyond the anomaly, often from the first

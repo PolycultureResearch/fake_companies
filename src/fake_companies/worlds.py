@@ -131,6 +131,19 @@ class MetricInfo(BaseModel):
     # day, which is NOT MetricFlow's weekly number (distinct over the week);
     # that number is in the weekly series file (``has_weekly_series``).
     measure_agg: str | None = None
+    # How MetricFlow 0.13 answers this metric at metric_time__week
+    # (SemanticLayer.metricflow_week): sum_of_days | average_of_rows |
+    # distinct_over_week | min_over_week | max_over_week | first_day |
+    # ratio_of_week_inputs | derived_of_week_inputs.
+    metricflow_week: str | None = None
+    # Whether ``time_aggregation`` applied to the daily series gives that same
+    # number. False for every stock (MetricFlow adds seven days of a level),
+    # every cumulative metric (MetricFlow takes the first day, the rule the
+    # last), every distinct count (MetricFlow's is in the weekly file) and
+    # anything computed from one of those. Where it is false the two answers
+    # differ by design: use time_aggregation for the business number and
+    # metricflow_week to reproduce mf query; never assume they agree.
+    matches_metricflow_week: bool | None = None
     # Whether each world's ``weekly_series`` file carries this metric: true
     # for every simple count_distinct metric, whose week value cannot be
     # derived from its days.
@@ -793,6 +806,8 @@ def _metric_inputs(layer, name: str, stocks: frozenset[str]) -> dict[str, Any]:
         "expr": metric.expr,
         "formula": layer.formula(name),
         "has_sides": layer.has_sides(name),
+        "metricflow_week": layer.metricflow_week(name),
+        "matches_metricflow_week": layer.matches_metricflow_week(name, stocks),
     }
 
 

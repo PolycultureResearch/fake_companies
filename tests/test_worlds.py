@@ -272,6 +272,16 @@ def test_stocks_and_windows_are_marked_in_the_manifest(tmp_path):
     assert agg["mrr"] == agg["active_subscriptions"] == "end_of_period"
     assert agg["new_mrr"] == "sum" and agg["dau"] == "count_distinct"
     assert agg["wau"] == "rolling_window" and agg["arpu"] == "derived"
+    # what MetricFlow answers at week grain, and where the rule differs from it
+    # (tests/test_semantic_matches_metricflow.py checks both against mf query)
+    mfw = {m.name: (m.metricflow_week, m.matches_metricflow_week) for m in manifest.metrics}
+    assert mfw["mrr"] == ("sum_of_days", False)  # MetricFlow adds up seven days of a level
+    assert mfw["wau"] == ("first_day", False)
+    assert mfw["dau"] == ("distinct_over_week", False)
+    assert mfw["new_mrr"] == ("sum_of_days", True)
+    assert mfw["visit_signup_rate"] == ("ratio_of_week_inputs", True)
+    assert mfw["customer_churn_rate"] == ("ratio_of_week_inputs", False)
+    assert mfw["arpu"] == ("derived_of_week_inputs", False)
     world = manifest.worlds[0]
     assert world.path is None and world.series == "baseline/s0/null.series.parquet"
     files = sorted(p.name for p in (tmp_path / "baseline" / "s0").iterdir())

@@ -1001,7 +1001,9 @@ manifest, which says `rolling_window`: take the *last* day. The last day is
 the trailing week that the period actually covers, which is what a week-grain
 WAU should mean, so the manifest is unchanged. But it is not MetricFlow's
 number: a consumer matching MetricFlow exactly takes the first day. The same
-holds for the cumulative stocks added in §10.3. Monthly grain is not built.
+holds for the cumulative stocks added in §10.3. The manifest now states this
+per metric (`metricflow_week`, `matches_metricflow_week`, §10.9). Monthly
+grain is not built.
 
 ### 10.3 Metrics the trees needed: discounted orders, and a stock in retail and wholesale
 
@@ -1257,6 +1259,51 @@ the effects themselves. Which scripted pairs (if any) hit two parents of
 one learned node depends on the tree, so a config that plants such a pair
 may be needed too. Not built: the runner's refused edges are case 1, which
 this would not help.
+
+### 10.9 What MetricFlow answers at week grain, stated per metric
+
+**The problem.** `metrics[].time_aggregation` says how a metric's days
+*should* combine into a week. For some metrics that is not what MetricFlow
+returns at `metric_time__week`, and §10.2 left the difference in prose: a
+cumulative metric is its last day by the rule and its first day in
+MetricFlow. Checking every metric showed more than that.
+
+**What MetricFlow 0.13 does**, verified metric by metric on all four smoke
+configs (`_check_week_rules` in the MetricFlow test reproduces `mf query
+--group-by metric_time__week` for every metric from the daily series by the
+stated rule, on every full week):
+
+| `metricflow_week` | Metrics | Agrees with `time_aggregation`? |
+|---|---|---|
+| `sum_of_days` | every `sum`/`count` measure, **including the stocks** MRR, open deals and open pipeline: MetricFlow does not know a level is a level and adds seven days of it | yes for flows, no for stocks |
+| `average_of_rows` | averages | yes |
+| `distinct_over_week` | `dau`, `paying_active_users`, `active_subscriptions` | no (the number is in the weekly series file) |
+| `first_day` | cumulative metrics: `wau`, `customer_base`, `trade_inventory_build` | no (the rule takes the last day) |
+| `ratio_of_week_inputs`, `derived_of_week_inputs` | ratios and derived metrics, from their inputs' week values | when every input agrees (not for `customer_churn_rate`, `arpu`) |
+
+**Design.** Two fields on every `metrics[]` entry, so the mismatch is named
+rather than left in prose:
+
+- `metricflow_week`: the rule above;
+- `matches_metricflow_week`: whether `time_aggregation` applied to the
+  daily series gives MetricFlow's week number. False for 11 metrics across
+  the four verticals: `mrr`, `active_subscriptions`, `dau`,
+  `paying_active_users`, `wau`, `arpu`, `customer_churn_rate`,
+  `open_deals`, `open_pipeline_value`, `customer_base`,
+  `trade_inventory_build`.
+
+`time_aggregation` is **not** changed to match MetricFlow. Where they differ,
+MetricFlow's number is the wrong business number (seven days of MRR added
+up; a weekly WAU that is mostly the previous week), and the rule is what a
+tree should use. A consumer that must reproduce `mf query` uses
+`metricflow_week`; one that wants the period's value uses `time_aggregation`;
+none may assume the two agree where `matches_metricflow_week` is false.
+
+**Not a schema bump.** Both fields are new and `time_aggregation` keeps its
+meaning, so a version 2 reader that ignores them reads every value as
+before. (A reader that validates the manifest strictly, as
+`load_world_set` does with an older fake_companies, rejects the unknown
+fields; upgrade the library to read new sets.)
 
 ---
 

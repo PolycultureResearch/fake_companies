@@ -284,15 +284,27 @@ def test_series_match_metricflow(config_name, tmp_path):
             checked += 1
     assert checked >= len(by_id)
 
-    # --- weekly distinct counts: MetricFlow's metric_time__week ------------ #
+    # --- what MetricFlow does at week grain, and whether the rule agrees --- #
     weekly_names = layer.weekly_metrics()
-    if not weekly_names:
-        return
     con = layer.build_marts(result.frames, result.tables)
     try:
         weekly = layer.weekly_series_from(con, result.calendar, singles)
     finally:
         con.close()
+    _check_week_rules(
+        layer,
+        vertical,
+        mine,
+        weekly,
+        _mf(dbt_dir, env, names, [], tmp_path / "weeks.csv", grain="week"),
+        lo,
+        hi,
+        config_name,
+    )
+
+    # --- weekly distinct counts: MetricFlow's metric_time__week ------------ #
+    if not weekly_names:
+        return
     first_week = lo - pd.Timedelta(days=lo.dayofweek)
     groups: dict[tuple[str, ...], list[str]] = {(): weekly_names}
     for n in weekly_names:
@@ -321,6 +333,82 @@ def test_series_match_metricflow(config_name, tmp_path):
                 f"{config_name}: weekly {name} by {dims or 'total'} differs from MetricFlow "
                 f"on {int((~ok).sum())} rows"
             )
+
+
+def _check_week_rules(layer, vertical, mine, weekly, mf_week, lo, hi, config_name):
+    """``metricflow_week`` reproduces mf query at week grain for every metric,
+    and ``matches_metricflow_week`` is true exactly when ``time_aggregation``
+    applied to the daily series gives the same number (full weeks only)."""
+    from fake_companies.effects import evaluate_formula
+
+    stocks = vertical.stock_metrics()
+    first = lo + pd.Timedelta(days=(7 - lo.dayofweek) % 7)
+    weeks = pd.date_range(first, hi - pd.Timedelta(days=6), freq="7D")
+    assert len(weeks) >= 4
+    totals = mine[mine["dimension"].isna()].copy()
+    totals["week"] = totals["date"] - pd.to_timedelta(totals["date"].dt.dayofweek, unit="D")
+    totals = totals[totals["week"].isin(weeks)]
+    by = {name: g.sort_values("date").groupby("week") for name, g in totals.groupby("metric")}
+    distinct = weekly[weekly["dimension"].isna()].set_index(["metric", "date"])["v"]
+
+    def theirs(name):
+        rule, m = layer.metricflow_week(name), layer.metrics[name]
+        g = by[name]
+        if rule == "sum_of_days":
+            return g["v"].sum()
+        if rule == "average_of_rows":
+            return g["numerator"].sum() / g["denominator"].sum()
+        if rule == "first_day":
+            return g["v"].first()
+        if rule == "distinct_over_week":
+            return distinct.loc[name].reindex(weeks)
+        if rule == "ratio_of_week_inputs":
+            return theirs(m.inputs["num"]) / theirs(m.inputs["den"]).replace(0, np.nan)
+        inputs = {k: theirs(k) for k in m.inputs.values()}
+        return pd.Series(
+            [
+                evaluate_formula(layer.formula(name), {k: v[w] for k, v in inputs.items()})
+                for w in weeks
+            ],
+            index=weeks,
+        )
+
+    def ours(name):
+        rule, m = layer.time_aggregation(name, stocks), layer.metrics[name]
+        g = by[name]
+        if rule == "sum":
+            return g["v"].sum()
+        if rule in ("end_of_period", "rolling_window"):
+            return g["v"].last()
+        if rule in ("average", "ratio_of_sums"):
+            return g["numerator"].sum() / g["denominator"].sum().replace(0, np.nan)
+        if rule == "ratio_of_aggregates":
+            return ours(m.inputs["num"]) / ours(m.inputs["den"]).replace(0, np.nan)
+        if rule == "derived":
+            inputs = {k: ours(k) for k in m.inputs.values()}
+            return pd.Series(
+                [
+                    evaluate_formula(layer.formula(name), {k: v[w] for k, v in inputs.items()})
+                    for w in weeks
+                ],
+                index=weeks,
+            )
+        return pd.Series(np.nan, index=weeks)  # count_distinct: not from days
+
+    mf_week = mf_week.set_index("date").reindex(weeks)
+    for name in sorted(layer.metrics):
+        expected = mf_week[name].to_numpy(dtype=float)
+        t = theirs(name).reindex(weeks).to_numpy(dtype=float)
+        assert np.allclose(t, expected, rtol=1e-9, atol=1e-9, equal_nan=True), (
+            f"{config_name}: metricflow_week={layer.metricflow_week(name)!r} does not reproduce "
+            f"MetricFlow's week value of {name}"
+        )
+        o = ours(name).reindex(weeks).to_numpy(dtype=float)
+        agree = np.allclose(o, expected, rtol=1e-9, atol=1e-9, equal_nan=True)
+        assert agree == layer.matches_metricflow_week(name, stocks), (
+            f"{config_name}: {name}: matches_metricflow_week says "
+            f"{layer.matches_metricflow_week(name, stocks)}, the numbers say {agree}"
+        )
 
 
 def _spell(value) -> str:
