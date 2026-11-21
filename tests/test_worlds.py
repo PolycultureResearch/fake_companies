@@ -92,6 +92,97 @@ def test_set_summary_says_where_twins_were_aligned(retail_set):
     assert (got == True).any() and (got == False).any()
 
 
+def _recipe_window_change(null, world, info, a, b):
+    """Spec 10.7, written out independently of fake_companies.effects:
+    (rel_change, rel_change_aggregated) of one total over days a..b."""
+    import math
+
+    def rows(frame, name):
+        r = frame[(frame["metric"] == name) & frame["dimension"].isna()]
+        d = pd.to_datetime(r["date"])
+        return r[(d >= a) & (d <= b)].sort_values("date")
+
+    def agg(frame, name):
+        m = info[name]
+        r = rows(frame, name)
+        if m.has_sides:
+            rules = (
+                tuple(m.input_time_aggregation[k] for k in ("numerator", "denominator"))
+                if m.type == "ratio"
+                else ("sum", "sum")
+            )
+            num, den = (side(r[c], rule) for c, rule in zip(("numerator", "denominator"), rules))
+            return num / den if den else math.nan
+        if m.time_aggregation == "derived":
+            return formula(m.formula, {k: agg(frame, k) for k in m.inputs.values()})
+        return side(r["metric_value"], m.time_aggregation)
+
+    def side(values, rule):
+        v = values.dropna()
+        if v.empty:
+            return math.nan
+        if rule == "sum":
+            return float(v.sum())
+        if rule in ("end_of_period", "rolling_window"):
+            return float(v.iloc[-1])
+        return math.nan
+
+    def formula(node, values):
+        if "const" in node:
+            return node["const"]
+        if "metric" in node:
+            return values[node["metric"]]
+        x = [formula(n, values) for n in node["args"]]
+        op = node["op"]
+        if op == "neg":
+            return -x[0]
+        if op == "nullif_zero":
+            return math.nan if x[0] == 0 else x[0]
+        if op == "/":
+            return math.nan if not x[1] or math.isnan(x[1]) else x[0] / x[1]
+        return {"+": x[0] + x[1], "-": x[0] - x[1], "*": x[0] * x[1]}[op]
+
+    def rel(w, n):
+        return math.nan if not n or math.isnan(n) or math.isnan(w) else w / n - 1
+
+    out = {}
+    for name in info:
+        n, w = rows(null, name)["metric_value"].mean(), rows(world, name)["metric_value"].mean()
+        out[name] = (rel(w, n), rel(agg(world, name), agg(null, name)))
+    return out
+
+
+def test_any_window_can_be_measured_from_the_series_as_the_spec_says(retail_set):
+    """The recipe in spec 10.7 reproduces the set's own numbers on the
+    declared window, so a consumer measuring another window from the series
+    files computes what the generator would have."""
+    out, manifest = retail_set
+    info = {m.name: m for m in manifest.metrics}
+    checked = 0
+    for single, null in manifest.twins():
+        truth = json.loads((out / single.ground_truth).read_text())[0]
+        a = pd.Timestamp(truth["start"])
+        b = pd.Timestamp(truth["end"]) if truth["end"] else pd.Timestamp("2100-01-01")
+        mine = _recipe_window_change(
+            pd.read_parquet(out / null.series), pd.read_parquet(out / single.series), info, a, b
+        )
+        theirs = pd.read_parquet(out / single.effects_summary)
+        theirs = theirs[theirs["dimension"].isna()].set_index("metric")
+        for name, (rel, rel_agg) in mine.items():
+            for got, want in ((rel, "rel_change"), (rel_agg, "rel_change_aggregated")):
+                expected = theirs.loc[name, want]
+                assert np.isclose(got, expected, rtol=1e-9, equal_nan=True), (name, want)
+                checked += 1
+    assert checked > 100
+    # a rate's two effects differ: the mean of daily ratios is not Σnum / Σden
+    summary = pd.read_parquet(out / manifest.effects_summary)
+    rates = summary[
+        summary["dimension"].isna() & summary["metric"].isin(["conversion_rate", "aov"])
+    ]
+    assert rates["rel_change_aggregated_mean"].notna().all()
+    assert not np.allclose(rates["rel_change_mean"], rates["rel_change_aggregated_mean"])
+
+
 def test_parse_seeds():
     assert parse_seeds("0-3") == [0, 1, 2, 3]
     assert parse_seeds("7") == [7]

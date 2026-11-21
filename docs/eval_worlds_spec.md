@@ -1161,6 +1161,60 @@ aggregates the window. For a rate that is almost always
 
 Not a schema bump: every field is new, nothing existing changed meaning.
 
+### 10.7 Other windows: measured by the consumer, by a written recipe
+
+**The question.** Effects are summarized for the anomaly's declared window
+only. Should the set also summarize a few fixed other windows (the first 28
+days, the window plus 90 days), or should the runner measure other windows
+itself?
+
+**Decision: the runner measures them, by the recipe below, and nothing more
+is summarized.** Reasons:
+
+- The windows a tool needs are its own: the analysis window it was run on,
+  which has no fixed relation to the anomaly's dates. Any fixed set the
+  generator picks (28 days, +90 days) would still not be that window, and
+  each one would add a full copy of the summary's columns.
+- A point estimate and its cross-seed statistics over any window need only
+  the two twins' series files, which every world has. They are exact and
+  cheap, and the recipe is short enough to write down so both sides compute
+  the same number. A test (`test_any_window_can_be_measured_from_the_series_as_the_spec_says`)
+  implements the recipe independently of `effects.py` from the series files
+  and reproduces the set's own `rel_change` and `rel_change_aggregated` on
+  the declared window, for every metric of every twin.
+- What cannot be recomputed simply, the noise floor, `onset` and `moved`,
+  is tied to the declared window by design. A tool scoring a size on
+  another window needs the size and its spread across seeds, which the
+  recipe gives, not a per-twin significance call.
+
+**The recipe**, for a window from day `a` to day `b` inclusive, one series
+(metric, `dimension`, `value`; `dimension` and `value` null for the total):
+
+1. For each single world in `worlds.json` and its `twin_of` null world, read
+   both `series` files and keep that series' rows with `a ≤ date ≤ b`.
+2. A slice present in only one of the two worlds is filled in the other:
+   `metric_value` with `metrics[].fill_nulls_with` (left null when that is
+   null), `numerator` and `denominator` with 0.
+3. `rel_change` = mean(world `metric_value`) / mean(null `metric_value`) − 1,
+   each mean over that world's days where the value is not null. Null when
+   the null mean is 0 or undefined.
+4. `rel_change_aggregated` = world value / null value − 1, each value by the
+   rule of §10.6: `sum` adds the non-null days; `end_of_period` and
+   `rolling_window` take the last non-null day; a metric with `has_sides`
+   aggregates `numerator` and `denominator` (by `input_time_aggregation` for
+   a ratio, both summed for an average) and divides, null when the
+   denominator is 0; `derived` evaluates `formula` on its inputs' window
+   values of the same slice; `count_distinct` is null (use the weekly file
+   for whole weeks).
+5. Across the set's seeds, per (anomaly, series): mean, standard deviation
+   (n − 1 in the denominator), standard error sd/√n, t = mean/se. To call
+   it, compare |t| with `verdicts[].t_critical` (for this seed count), with
+   the same `exactly_zero` rule: if no seed's twins differ on any day of the
+   timeline, it is exactly zero regardless of the window.
+
+An open-ended anomaly (`end` null) uses the timeline's last day as `b` for
+its declared window.
+
 ---
 
 *This document is written and maintained by an AI agent (Claude), with human oversight.*

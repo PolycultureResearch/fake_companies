@@ -314,6 +314,10 @@ across seeds) is the change of the metric's value over the window by its own
 `time_aggregation`: Σnumerator / Σdenominator for a rate, the last day for a
 stock, the formula over its inputs for a derived metric, NULL for a distinct
 count. Score a rate's attribution against the aggregated one.
+Effects are summarized for the anomaly's declared window only. For any other
+window, measure it from the two twins' series files by the recipe in
+`docs/eval_worlds_spec.md` §10.7; it reproduces the set's own numbers on the
+declared window.
 `aligned_before_start` says, per anomaly, metric and slice, whether every
 seed's twins were identical before the anomaly's start (then one twin's
 difference is clean before it and `first_diff` is exact);
