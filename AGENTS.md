@@ -25,6 +25,21 @@ exact path; Tremor KPI mode too) — the one contract identical across verticals
 dataflow mode profiles the raw tables directly (needs event_time + `_loaded_at`
 columns).
 
+`fake-companies worlds --config configs/<scenario>.yaml --seeds 0-9 --null --singles all
+--out out/worlds/<name>` writes a **world set** for evaluating a tool instead of
+demoing it: per regime and seed, the *null* world (no anomalies), one *single* world
+per scripted anomaly, optionally the config as written, plus `worlds.json` (the
+manifest, a pydantic model in `worlds.py` — the only contract consumers read). Each
+world also gets `<world>.series.parquet`, every metric's daily series (total and by
+each dimension, with ratio numerators/denominators), so a consumer needs neither dbt
+nor the raw tables (`--no-raw` drops those). Each single world carries **measured
+effects**: its day-by-day difference from its null
+twin for every metric (`effects.py`), summarized into its ground truth and, across
+seeds, into `effects_summary.parquet`. The metric series come from `semantic.py`,
+which runs the vertical's dbt models and semantic YAML in-process (no dbt needed;
+`tests/test_semantic_matches_metricflow.py` holds it to MetricFlow's numbers).
+Spec: `docs/eval_worlds_spec.md`; recipe: `docs/using.md`.
+
 ## Architecture (generic engine × vertical plug-ins)
 
 The pipeline has three layers; the *mechanisms* are generic, the *business model* is a
@@ -54,7 +69,9 @@ from `company.vertical` by the registry in `verticals/__init__.py`):
 A vertical package owns: `config.py` (a `BaseScenarioConfig` subclass — the YAML stays
 flat), `tables.py` (TableSpecs; list order = loading order = RNG draw order),
 `drivers.py`, `entities/`, `dq.py` (columns dq events may corrupt), `metrics.py`
-(driver → affected MetricFlow metrics), and a `dbt/<vertical>/` project.
+(driver → affected MetricFlow metrics, and driver → root metric + slice), a
+`dbt/<vertical>/` project, and a `configs/regimes/<vertical>.yaml` of named baseline
+regimes.
 `tests/test_vertical_conformance.py` keeps all of these consistent — run it after
 touching any of them.
 
@@ -74,7 +91,19 @@ Every injected anomaly (rate or dq, scripted or surprise-sampled) emits a
   pydantic models (`config/schema.py` envelope + `verticals/<name>/config.py`
   sections). No hidden constants for tunable behavior.
 - Baseline shape (growth/seasonality/noise) is NOT an anomaly and never enters ground
-  truth; only `anomalies:` entries do.
+  truth; only `anomalies:` entries do. A regime is baseline shape: it may not touch
+  `anomalies`.
+- **Selection and overrides never change the default bytes.** `--anomalies`, `--set`,
+  `--regime` and everything `worlds` adds are opt-in: with none of them, `generate`
+  writes exactly what it did before they existed (the golden hashes prove it for the
+  tables; the run manifest gains keys only when an option is used). New ground-truth
+  fields go in `ground_truth.json`; `meta.ground_truth` keeps its twelve columns
+  because its bytes are pinned.
+- **A twin difference is effect plus noise.** Most entity builders draw for the whole
+  timeline from one stream, so a single world differs from its null twin beyond the
+  anomaly (`tests/test_effects.py` pins which tables and metrics match). Do not
+  "fix" this by changing how a builder consumes its stream — that moves the golden
+  hashes. Measure the noise (`effects.py`) and use the cross-seed summary.
 - Tremor is early-stage and volatile: build against the stable contract only (raw
   tables + daily MetricFlow KPIs); keep Tremor-specific bits in `examples/`.
 
@@ -88,6 +117,11 @@ Every injected anomaly (rate or dq, scripted or surprise-sampled) emits a
 - `uv run fake-companies generate --config configs/alpenglow_retail_dtc.yaml --out out/alpenglow.duckdb`
   (likewise meridian_b2b_services.yaml → out/meridian.duckdb, bristlecone_cpg.yaml →
   out/bristlecone.duckdb)
+- `uv run fake-companies generate --config <cfg> --out <db> --anomalies none` (a null
+  world; `only:<name>[,<name>]` keeps named scripted anomalies), `--set
+  timeline.days=1095` (override by dotted path), `--regime flat`
+- `uv run fake-companies worlds --config configs/smoke_retail_90d.yaml --seeds 0-2 --null
+  --singles all --format parquet --jobs 3 --out out/worlds/retail_smoke`
 - `uv run pytest` (`-m "not slow"` for quick loop; slow = statistical + golden suite)
 - `uv run ruff check . && uv run ruff format .` (line length 100)
 - dbt: `cd dbt/<vertical> && dbt build` (profile reads `FAKE_DB` env var; each project

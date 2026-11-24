@@ -137,6 +137,10 @@ semantic_models:
         description: Order-level promo discounts.
         agg: sum
         expr: discount_amount
+      - name: discounted_orders
+        description: Orders that got a promo discount.
+        agg: sum
+        expr: case when discount_amount > 0 then 1 else 0 end
       - name: shipping_revenue
         description: Shipping fees charged.
         agg: sum

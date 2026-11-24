@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import ValidationError
@@ -17,12 +18,41 @@ from pydantic import ValidationError
 from .schema import BaseScenarioConfig
 
 
-def load_config(path: str | Path) -> BaseScenarioConfig:
-    """Parse and validate a scenario YAML file against its vertical's model."""
+def load_config(
+    path: str | Path,
+    overrides: dict[str, Any] | None = None,
+    regime: str | None = None,
+) -> BaseScenarioConfig:
+    """Parse and validate a scenario YAML file against its vertical's model.
+
+    ``regime`` names a set of overrides from ``configs/regimes/<vertical>.yaml``
+    and ``overrides`` maps dotted paths to values (see ``config.overrides``);
+    the regime is applied first, then the explicit overrides. Both happen
+    before validation, and both are remembered on the returned config
+    (``applied_overrides`` / ``regime``) so the run manifest can record them.
+    With neither, this is the plain load it always was.
+    """
     raw = Path(path).read_text()
     data = yaml.safe_load(raw)
     if not isinstance(data, dict):
         raise TypeError(f"config {path} did not parse to a mapping")
+
+    applied: dict[str, Any] = {}
+    if regime is not None or overrides:
+        from .overrides import BASELINE_REGIME, apply_overrides, regime_overrides
+
+        peek = data.get("company")
+        peek_vertical = "b2c_saas"
+        if isinstance(peek, dict) and peek.get("vertical") is not None:
+            peek_vertical = str(peek["vertical"])
+        if regime is not None and regime != BASELINE_REGIME:
+            applied.update(regime_overrides(peek_vertical, regime))
+        applied.update(overrides or {})
+        data = apply_overrides(data, applied)
+        if not isinstance(data.get("company"), dict) or (
+            str(data["company"].get("vertical", "b2c_saas")) != peek_vertical
+        ):
+            raise ValueError(f"config {path}: an override may not change company.vertical")
 
     company = data.get("company")
     vertical_name = "b2c_saas"
@@ -37,10 +67,15 @@ def load_config(path: str | Path) -> BaseScenarioConfig:
         raise ValueError(f"config {path}: {e.args[0]}") from None
 
     try:
-        return vertical.config_model().model_validate(data)
+        cfg = vertical.config_model().model_validate(data)
     except ValidationError as e:
         e.add_note(f"while validating {path} as vertical {vertical.name!r}")
+        if applied:
+            e.add_note(f"after overrides {applied}")
         raise
+    cfg._applied_overrides = applied
+    cfg._regime = regime
+    return cfg
 
 
 def config_hash(cfg: BaseScenarioConfig) -> str:

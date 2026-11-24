@@ -180,6 +180,17 @@ point.
 
 ---
 
+## 5. World sets for evaluation
+
+Specified separately in [`eval_worlds_spec.md`](eval_worlds_spec.md): batches of
+related generated companies (null, single and twin worlds across seeds and
+regimes) with a manifest and ground truth measured from the data. Phase 1
+(anomaly selection, overrides and regimes, the `worlds` command, measured
+effects, root labels) is built; phase 2 (calendar table, evaluation trees, new
+anomaly shapes, noise options, blind sets) is not started.
+
+---
+
 ## Not on this roadmap (deliberately)
 
 - Vectorizing `lifecycle._derive_subscriptions` (per-group loop) — it's correct and

@@ -75,7 +75,10 @@ def _load_truth(path: str | Path) -> list[dict]:
         if start is None:
             continue
         labels = set()
-        for key in ("target", "affected_metrics", "affected_signals"):
+        # root_metric: a detector watching the root metric by its dimension
+        # (units by category for a mix shift, where the total does not move)
+        # has found the anomaly even though the total is not an affected metric.
+        for key in ("target", "affected_metrics", "affected_signals", "root_metric"):
             v = r.get(key)
             if isinstance(v, str):
                 labels.add(v)

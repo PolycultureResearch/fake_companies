@@ -93,3 +93,14 @@ def test_transactions_cover_orders_and_refunds(retail_cfg, retail_result):
     refunds = tx[tx["kind"] == "refund"]
     n_refunded = int(ret["refunded_at"].notna().sum())
     assert len(refunds) == n_refunded
+
+
+def test_order_placed_just_past_the_timeline_end(retail_cfg):
+    """A session in the last minutes of the final day checks out after
+    midnight. Seed 58 has one; the returns stage used to index past the panel."""
+    from fake_companies.generate import generate
+
+    result = generate(retail_cfg, seed=58, anomalies="none")
+    orders = result.frames["shop_db.orders"]
+    end = pd.Timestamp(retail_cfg.timeline.end_date) + pd.Timedelta(days=1)
+    assert (pd.to_datetime(orders["placed_at"]) >= end).any()

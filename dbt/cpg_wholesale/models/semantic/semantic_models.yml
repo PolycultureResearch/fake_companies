@@ -107,3 +107,32 @@ semantic_models:
         description: Consumer retail dollars scanned.
         agg: sum
         expr: dollars
+
+  # ----------------------------------------------------------------------- #
+  # Retail inventory (sell-in minus sell-through)
+  # ----------------------------------------------------------------------- #
+  - name: inventory_flows
+    description: >-
+      Units into retail inventory (shipments, +) and out of it (POS units
+      spread over their week, -), from the first scanned week on.
+    model: ref('fct_inventory_flows')
+    defaults:
+      agg_time_dimension: flow_date
+    entities:
+      - name: inventory_flow
+        type: primary
+        expr: flow_id
+    dimensions:
+      - name: flow_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: retailer_banner
+        type: categorical
+      - name: category
+        type: categorical
+    measures:
+      - name: net_inventory_units
+        description: Units shipped into retail less units sold through.
+        agg: sum
+        expr: units

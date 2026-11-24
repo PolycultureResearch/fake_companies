@@ -1,0 +1,22 @@
+# Named baseline regimes for the b2b_services vertical: `{regime: {dotted.path: value}}`.
+# Applied before validation by `--regime <name>` / `load_config(..., regime=...)`.
+# A regime changes the baseline shape only; it may not touch `anomalies`.
+# `baseline` (the config as written) is built in and may not be redefined.
+#
+# Growth lives on each lead source; `*` sets it on every source the config has.
+flat:
+  leads.sources.*.growth: { kind: flat }
+declining:  # about -17% a year, compounding
+  leads.sources.*.growth: { kind: exponential, rate: -0.0005 }
+accelerating:  # about +55% a year, compounding
+  leads.sources.*.growth: { kind: exponential, rate: 0.0012 }
+# Three years from the configured start. The timeline grows forward, so every
+# scripted anomaly keeps its dates.
+long_history:
+  timeline.end: null
+  timeline.days: 1095
+# No annual cycle, no holiday effect, no day-of-week shape.
+no_seasonality:
+  calendar.annual_amp: 0.0
+  calendar.holiday_effect: 1.0
+  weekly_shape: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]

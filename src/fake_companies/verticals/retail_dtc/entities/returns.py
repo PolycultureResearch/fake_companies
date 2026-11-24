@@ -37,8 +37,15 @@ def build_returns(
     line_delivered = pd.to_datetime(items["order_id"].map(delivered_at))
     eligible = line_delivered.notna().to_numpy()
 
+    # Checkout lands ~10 minutes after the session starts, so a session in the
+    # last minutes of the final day places its order just past the timeline:
+    # read that order's rate from the final day. (Unclipped, it indexed one row
+    # past the panel and the run died — about one seed in fifty on a 90-day
+    # config. A run that never hit it is unchanged by the clip.)
     order_day = (
-        (pd.to_datetime(items["placed_at"]) - pd.Timestamp(cal.start)).dt.days.to_numpy().clip(0)
+        (pd.to_datetime(items["placed_at"]) - pd.Timestamp(cal.start))
+        .dt.days.to_numpy()
+        .clip(0, cal.n_days - 1)
     )
 
     # Per-line return probability from the per-category driver (order-day rate:

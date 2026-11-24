@@ -40,8 +40,27 @@ class GenerationResult:
     manifest: dict[str, str] = field(default_factory=dict)
 
 
-def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResult:
-    """Run the full pipeline in memory and return frames + ground truth."""
+def _affected_in_window(vertical, cfg):
+    """The vertical's window-aware declaration, bound to this config, or None
+    (only retail has one: promotions decide whether discounted orders move)."""
+    hook = getattr(vertical, "affected_metrics_in_window", None)
+    if hook is None:
+        return None
+    return lambda driver, start, end: hook(cfg, driver, start, end)
+
+
+def generate(
+    cfg: BaseScenarioConfig, seed: int | None = None, anomalies: str = "all"
+) -> GenerationResult:
+    """Run the full pipeline in memory and return frames + ground truth.
+
+    ``anomalies`` narrows the anomaly set (``all`` | ``none`` |
+    ``only:<name>[,...]``, see :func:`fake_companies.anomalies.select_anomalies`);
+    the default leaves ``cfg`` and every output byte untouched.
+    """
+    from .anomalies import resolve_anomalies, select_anomalies
+
+    cfg = select_anomalies(cfg, anomalies)
     seed = cfg.seed if seed is None else seed
     vertical = get_vertical(cfg.company.vertical)
     cal = build_calendar(cfg)
@@ -51,8 +70,6 @@ def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResu
     ground_truth: list[GroundTruthRecord] = []
 
     # Resolve scripted + surprise anomalies once (stable rate/dq split).
-    from .anomalies import resolve_anomalies
-
     resolved = resolve_anomalies(cfg, cal, rng, vertical)
 
     # --- Layer 1: latent driver panel + rate anomalies ---------------------- #
@@ -60,7 +77,13 @@ def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResu
 
     panel = vertical.build_drivers(cfg, cal, rng)
     panel, rate_gt = apply_rate_events(
-        panel, resolved, cal, known=vertical.known_drivers(cfg), affected=vertical.affected_metrics
+        panel,
+        resolved,
+        cal,
+        known=vertical.known_drivers(cfg),
+        affected=vertical.affected_metrics,
+        root=vertical.root_label,
+        affected_in_window=_affected_in_window(vertical, cfg),
     )
     ground_truth.extend(rate_gt)
 
@@ -73,7 +96,7 @@ def generate(cfg: BaseScenarioConfig, seed: int | None = None) -> GenerationResu
     dq_gt = apply_loading_and_dq(cfg, cal, rng, frames, resolved, tables=vertical.tables())
     ground_truth.extend(dq_gt)
 
-    manifest = build_manifest(cfg, seed, len(ground_truth))
+    manifest = build_manifest(cfg, seed, len(ground_truth), anomaly_selection=anomalies)
     return GenerationResult(
         cfg=cfg,
         seed=seed,
@@ -89,6 +112,7 @@ def write_generation(
     result: GenerationResult,
     out_path: str | Path,
     sidecar_dir: str | Path | None = None,
+    sidecar_stem: str | None = None,
 ) -> Path:
     """Persist a :class:`GenerationResult` to a DuckDB database + JSON sidecars."""
     out_path = Path(out_path)
@@ -99,7 +123,7 @@ def write_generation(
         writer.write("meta.run_manifest", manifest_frame(result.manifest))
 
     sidecar_dir = Path(sidecar_dir) if sidecar_dir else out_path.parent
-    write_json_sidecars(sidecar_dir, result.manifest, result.ground_truth)
+    write_json_sidecars(sidecar_dir, result.manifest, result.ground_truth, stem=sidecar_stem)
     return out_path
 
 
@@ -108,7 +132,8 @@ def run_generation(
     out_path: str | Path,
     seed: int | None = None,
     sidecar_dir: str | Path | None = None,
+    anomalies: str = "all",
 ) -> GenerationResult:
-    result = generate(cfg, seed=seed)
+    result = generate(cfg, seed=seed, anomalies=anomalies)
     write_generation(result, out_path, sidecar_dir=sidecar_dir)
     return result

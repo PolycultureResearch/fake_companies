@@ -10,6 +10,7 @@ __pycache__/
 /out/*.duckdb
 /out/*.duckdb.wal
 /out/export/
+/out/worlds/
 *.parquet
 ground_truth.json
 run_manifest.json

@@ -9,8 +9,10 @@
 #                                 surfacing with the delivery+request lag
 #   3. paid_social_budget_cut   — marketing halves paid_social spend for 3 weeks;
 #                                 cascades spend -> sessions -> orders -> revenue
-#   4. tees_demand_slump        — tees demand drops 30% for 2 weeks (category mix shift;
-#                                 units/revenue dip concentrated in one category)
+#   4. tees_demand_slump        — tees demand drops 30% for 2 weeks (category mix shift:
+#                                 tees units fall ~25%, total units do not move, and
+#                                 total revenue rises ~5% as baskets shift to pricier
+#                                 categories — measured, see docs/eval_worlds_spec.md §8)
 company:
   name: Alpenglow Supply Co.
   slug: alpenglow

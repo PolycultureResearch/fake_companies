@@ -1,0 +1,26 @@
+# Named baseline regimes for the b2c_saas vertical: `{regime: {dotted.path: value}}`.
+# Applied before validation by `--regime <name>` / `load_config(..., regime=...)`.
+# A regime changes the baseline shape only; it may not touch `anomalies`.
+# `baseline` (the config as written) is built in and may not be redefined.
+#
+# Growth lives on each traffic channel (`growth` for organic/fixed channels,
+# `spend_growth` for paid ones); `*` sets it on every channel the config has.
+flat:
+  traffic.channels.*.growth: { kind: flat }
+  traffic.channels.*.spend_growth: { kind: flat }
+declining:  # about -17% a year, compounding
+  traffic.channels.*.growth: { kind: exponential, rate: -0.0005 }
+  traffic.channels.*.spend_growth: { kind: exponential, rate: -0.0005 }
+accelerating:  # about +55% a year, compounding
+  traffic.channels.*.growth: { kind: exponential, rate: 0.0012 }
+  traffic.channels.*.spend_growth: { kind: exponential, rate: 0.0012 }
+# Three years from the configured start. The timeline grows forward, so every
+# scripted anomaly keeps its dates.
+long_history:
+  timeline.end: null
+  timeline.days: 1095
+# No annual cycle, no holiday effect, no day-of-week shape.
+no_seasonality:
+  calendar.annual_amp: 0.0
+  calendar.holiday_effect: 1.0
+  weekly_shape: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]

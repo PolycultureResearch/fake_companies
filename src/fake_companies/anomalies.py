@@ -44,6 +44,42 @@ def resolve_anomalies(
     return resolved
 
 
+def select_anomalies(cfg: BaseScenarioConfig, selection: str = "all") -> BaseScenarioConfig:
+    """Return ``cfg`` with its anomaly set narrowed by ``selection``.
+
+    - ``all`` (the default): ``cfg`` itself, untouched — the default path must
+      stay byte-identical, so nothing is copied or re-validated.
+    - ``none``: no scripted anomalies and no surprise sampling (a null world).
+    - ``only:<name>[,<name>...]``: the named scripted anomalies, in config
+      order, and no surprise sampling.
+
+    Selection cannot disturb anything else's randomness: surprise sampling
+    draws only from its own ``anomalies.surprise`` stream and the dq layer only
+    from ``dq``, and :class:`RngHub` streams are independent by name.
+    """
+    if selection == "all":
+        return cfg
+    if selection == "none":
+        names: list[str] = []
+    elif selection.startswith("only:"):
+        names = [n.strip() for n in selection[len("only:") :].split(",") if n.strip()]
+        if not names:
+            raise ValueError("anomaly selection 'only:' needs at least one anomaly name")
+        known = [a.name for a in cfg.anomalies.scripted]
+        unknown = sorted(set(names) - set(known))
+        if unknown:
+            raise ValueError(
+                f"anomaly selection names unknown scripted anomalies {unknown}; known: {known}"
+            )
+    else:
+        raise ValueError(
+            f"anomaly selection {selection!r} is not 'all', 'none' or 'only:<name>[,<name>...]'"
+        )
+    kept = [a for a in cfg.anomalies.scripted if a.name in names]
+    anomalies = cfg.anomalies.model_copy(update={"scripted": kept, "surprise": None})
+    return cfg.model_copy(update={"anomalies": anomalies})
+
+
 def rate_anomalies(resolved: list[ResolvedAnomaly]) -> list[ResolvedAnomaly]:
     return [r for r in resolved if r.spec.kind == "rate"]
 

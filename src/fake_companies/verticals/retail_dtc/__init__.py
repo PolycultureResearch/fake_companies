@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from ...core.rng import RngHub
     from ...latent.panel import DriverPanel
     from ...output.schemas import TableSpec
-    from ..base import DQTableMeta
+    from ..base import DQTableMeta, RootLabel
 
 
 class RetailDTCVertical:
@@ -75,6 +75,23 @@ class RetailDTCVertical:
         from .metrics import affected_metrics_for_driver
 
         return affected_metrics_for_driver(driver)
+
+    def affected_metrics_in_window(self, cfg, driver: str, start, end) -> list[str]:
+        """``affected_metrics`` for one anomaly window (promotions decide
+        whether discounted orders move); see ``metrics.affected_metrics_in_window``."""
+        from .metrics import affected_metrics_in_window
+
+        return affected_metrics_in_window(cfg, driver, start, end)
+
+    def root_label(self, driver: str, segment: dict[str, str] | None = None) -> RootLabel:
+        from .metrics import root_label_for_driver
+
+        return root_label_for_driver(driver, segment)
+
+    def stock_metrics(self) -> frozenset[str]:
+        from .metrics import STOCK_METRICS
+
+        return STOCK_METRICS
 
     def dbt_project(self) -> str:
         return "retail_dtc"

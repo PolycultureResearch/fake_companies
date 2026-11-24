@@ -18,8 +18,17 @@ from ..groundtruth import GroundTruthRecord
 TOOL_VERSION = "0.1.0"
 
 
-def build_manifest(cfg: BaseScenarioConfig, seed: int, n_records: int) -> dict[str, str]:
-    return {
+def build_manifest(
+    cfg: BaseScenarioConfig, seed: int, n_records: int, anomaly_selection: str = "all"
+) -> dict[str, str]:
+    """The run manifest for ``cfg`` (the *effective* config: after any
+    overrides and anomaly selection, so ``config_hash`` identifies the bytes).
+
+    ``anomaly_selection``, ``regime`` and ``overrides`` (JSON, dotted path ->
+    value) are recorded only when they are not the default, so a default run's
+    manifest is exactly what it was before any of them existed.
+    """
+    manifest = {
         "tool_version": TOOL_VERSION,
         "company": cfg.company.name,
         "company_slug": cfg.company.slug,
@@ -31,6 +40,13 @@ def build_manifest(cfg: BaseScenarioConfig, seed: int, n_records: int) -> dict[s
         "n_days": str(cfg.timeline.n_days),
         "n_ground_truth": str(n_records),
     }
+    if anomaly_selection != "all":
+        manifest["anomaly_selection"] = anomaly_selection
+    if cfg.regime is not None:
+        manifest["regime"] = cfg.regime
+    if cfg.applied_overrides:
+        manifest["overrides"] = json.dumps(cfg.applied_overrides, sort_keys=True, default=str)
+    return manifest
 
 
 def manifest_frame(manifest: dict[str, str]) -> pd.DataFrame:
@@ -65,12 +81,17 @@ def write_json_sidecars(
     out_dir: Path,
     manifest: dict[str, str],
     records: list[GroundTruthRecord],
+    stem: str | None = None,
 ) -> tuple[Path, Path]:
+    """Write ``run_manifest.json`` and ``ground_truth.json`` into ``out_dir``.
+
+    ``stem`` prefixes both names (``<stem>.ground_truth.json``) so several
+    worlds can share one directory.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = out_dir / "run_manifest.json"
-    truth_path = out_dir / "ground_truth.json"
+    prefix = f"{stem}." if stem else ""
+    manifest_path = out_dir / f"{prefix}run_manifest.json"
+    truth_path = out_dir / f"{prefix}ground_truth.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
-    truth_path.write_text(
-        json.dumps([r.model_dump(mode="json") for r in records], indent=2, default=str)
-    )
+    truth_path.write_text(json.dumps([r.as_json() for r in records], indent=2, default=str))
     return manifest_path, truth_path

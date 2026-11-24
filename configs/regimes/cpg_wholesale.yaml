@@ -1,0 +1,27 @@
+# Named baseline regimes for the cpg_wholesale vertical: `{regime: {dotted.path: value}}`.
+# Applied before validation by `--regime <name>` / `load_config(..., regime=...)`.
+# A regime changes the baseline shape only; it may not touch `anomalies`.
+# `baseline` (the config as written) is built in and may not be redefined.
+#
+# KNOWN GAP: in this vertical only brand-marketing spend has a growth curve,
+# and marketing is causally decoupled from sales. Consumer demand and banner
+# velocity have no growth knob, so `flat`, `declining` and `accelerating`
+# change marketing_spend and nothing else: sales stay trendless in every
+# regime. Giving consumer demand a growth curve is a config change to the
+# vertical, not a regime.
+flat:
+  marketing.channels.*.growth: { kind: flat }
+declining:  # about -17% a year, compounding
+  marketing.channels.*.growth: { kind: exponential, rate: -0.0005 }
+accelerating:  # about +55% a year, compounding
+  marketing.channels.*.growth: { kind: exponential, rate: 0.0012 }
+# Three years from the configured start. The timeline grows forward, so every
+# scripted anomaly keeps its dates.
+long_history:
+  timeline.end: null
+  timeline.days: 1095
+# No annual cycle, no holiday effect, no day-of-week shape.
+no_seasonality:
+  calendar.annual_amp: 0.0
+  calendar.holiday_effect: 1.0
+  weekly_shape: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]

@@ -134,6 +134,38 @@ uv run fake-companies score --truth ground_truth.json --events my_events.json --
 
 Don't open `ground_truth.json` until after scoring.
 
+### A company with no anomalies, or with exactly one
+
+```bash
+uv run fake-companies generate -c configs/alpenglow_retail_dtc.yaml -o out/null.duckdb \
+    --anomalies none                         # no scripted anomalies, no surprises
+uv run fake-companies generate -c configs/alpenglow_retail_dtc.yaml -o out/one.duckdb \
+    --anomalies only:paid_social_budget_cut  # named scripted anomalies, no surprises
+```
+
+`--anomalies all` is the default and is what the config says. Selection never
+changes any other random draw: the rows that the dropped anomalies did not touch
+come out the same.
+
+### Change one thing about the baseline
+
+`--set` overrides a config value by dotted path (repeatable; the value is YAML;
+`*` stands for every key at that point). The result is validated like a
+hand-edited file and the overrides are recorded in `run_manifest.json`.
+
+```bash
+uv run fake-companies generate -c configs/smoke_retail_90d.yaml -o out/x.duckdb \
+    --set calendar.annual_amp=0 --set 'traffic.channels.*.growth={kind: flat}'
+```
+
+`--regime <name>` applies a named set of overrides from
+`configs/regimes/<vertical>.yaml`: `flat`, `declining`, `accelerating`,
+`long_history` (three years from the configured start) or `no_seasonality` (no
+annual cycle, holiday effect or day-of-week shape). A regime changes the
+baseline only and never the anomalies. In `cpg_wholesale` the three growth
+regimes move marketing spend and nothing else, because that is the only driver
+there with a growth curve.
+
 ### Change scale / timeline / seed
 
 - Timeline: `timeline: { start: 2024-01-01, days: 365 }` (or `end:`).
@@ -155,6 +187,217 @@ Don't open `ground_truth.json` until after scoring.
   checks every tree metric + Tremor table against a built db.
 - **Tremor dataflow mode** profiles the raw tables directly (needs `event_time` +
   `_loaded_at`). See `examples/tremor_white_cube.yaml`.
+
+## World sets (evaluating a tool, not just running it)
+
+One generated company cannot tell you whether a tool is right. A **world set**
+is a batch of related companies with a manifest: the same company with and
+without each anomaly, across seeds, optionally under several regimes.
+
+```bash
+uv run fake-companies worlds --config configs/alpenglow_retail_dtc.yaml \
+    --seeds 0-9 --regime baseline --regime flat \
+    --null --singles all --format parquet --jobs 4 --out out/worlds/alpenglow
+```
+
+Per regime and seed this writes the **null** world (no anomalies), one
+**single** world per scripted anomaly (`--singles all`, or a comma list of
+names; singles always bring their null twin), and with `--story` the config as
+written. `--format duckdb` (default) writes one database per world; `parquet`
+writes the raw tables as `<schema>.<table>.parquet`, which is smaller. `--jobs`
+only changes the wall time. `--set` applies an override to every world.
+`--no-raw` skips the raw tables altogether (they are most of a world's size)
+for a consumer that reads only the metric series and effects; `--no-series`
+and `--no-effects` skip those.
+
+```
+out/worlds/alpenglow/
+  worlds.json                                   # the manifest: read this, not the tree
+  effects_summary.parquet                       # every effect across seeds
+  baseline/s0/null/                             # or null.duckdb
+  baseline/s0/null.ground_truth.json            # []
+  baseline/s0/null.run_manifest.json
+  baseline/s0/null.series.parquet               # every world has one
+  baseline/s0/null.weekly_series.parquet        # B2C only: distinct counts by week
+  baseline/s0/only.paid_social_budget_cut/
+  baseline/s0/only.paid_social_budget_cut.ground_truth.json
+  baseline/s0/only.paid_social_budget_cut.run_manifest.json
+  baseline/s0/only.paid_social_budget_cut.series.parquet
+  baseline/s0/only.paid_social_budget_cut.effects.parquet
+```
+
+Read a set through its manifest (paths are relative to it):
+
+```python
+import json, pandas as pd
+from fake_companies.worlds import load_world_set
+
+root = "out/worlds/alpenglow"
+ws = load_world_set(root)                      # a validated WorldSetManifest
+for single, null in ws.twins():                # (single world, its null twin)
+    truth = json.load(open(f"{root}/{single.ground_truth}"))[0]
+    effects = pd.read_parquet(f"{root}/{single.effects}")
+    orders = pd.read_parquet(f"{root}/{single.path}/shop_db.orders.parquet")
+summary = pd.read_parquet(f"{root}/{ws.effects_summary}")
+```
+
+`worlds.json` → `schema_version` says which contract built the set (2 since
+2026-11-20; the spec's §10.4 lists what each version holds). Ask for the one
+you need and an older set is refused before anything is read:
+`load_world_set(root, min_version=2)` raises `UnsupportedWorldSet`.
+
+World ids are `<slug>.<regime>.s<seed>.<null | only.<anomaly> | story>`. The
+same config, seed, regime and anomaly always give the same id and the same
+bytes, whichever other worlds are in the set.
+
+**Ground truth in a single world** has the usual fields plus:
+
+- `root_metric`, `root_dimension`, `root_value` (and `root_slice`, the same as
+  a mapping): the MetricFlow metric the anomaly moves first and the slice of it
+  that it touches, e.g. `conversion_rate` / `channel,device` /
+  `paid_search,mobile`. `worlds.json` → `metrics[].dimensions` maps each
+  dimension to its MetricFlow group-by id (`channel` → `session__channel`).
+  Every `generate` run writes these too.
+- `measured_effects`: per metric, read off the difference between this world
+  and its null twin: `rel_change` over the declared window, `noise_floor`,
+  `first_diff` (the first day the twins differ at all), `onset` / `offset`
+  (first and last day over the floor), `days_over_floor`, `z_window` /
+  `z_extended` (the window test) and `moved`.
+- `root_metric_rate`: when the root is a rate's numerator count (a
+  `return_rate.<category>` anomaly roots at `returned_units`, a `churn.<plan>`
+  anomaly at `churned_subscriptions`, because MetricFlow cannot slice those
+  ratios), the rate itself (`return_rate`, `customer_churn_rate`). A tree whose
+  node is the rate matches on this. Null otherwise. Written by every run.
+- `metrics_moved`: every metric whose total moved, declared or not. `[]` means
+  the anomaly moved no metric — true of most data-quality anomalies, whose
+  truth is in `affected_signals`.
+- `root_effect` and `root_metric_confirmed`: the same for the root metric at
+  the root slice.
+- `declared_affected_metrics_confirmed`: each of `affected_metrics` under
+  `moved`, `moved_in_slice_only` or `not_detected`.
+
+**`*.effects.parquet`** is the day-by-day table behind those numbers: `date`,
+`metric`, `dimension`, `value`, `null_value`, `world_value`, `diff`, for every
+metric of the vertical (`dimension` and `value` are null for the total; the
+slices are the anomaly's root slice and each of its dimensions).
+
+**Which date to use.** `first_diff` is the first day the twins differ at all.
+When that series' `pre_onset_rms_diff` is 0 the twins were identical until the
+anomaly, so `first_diff` is the exact day the effect arrives: prefer it. `onset`
+is the first day the difference clears the noise floor, which is when a
+detector could first see it — for a ramp or a trend change that is by design
+two to three weeks after the start, and for a sparse metric it may never
+happen (`onset` null). Use `onset` only when `pre_onset_rms_diff` is not 0
+(then `first_diff` is just the first noisy day).
+
+**`*.effects_summary.parquet`** (single worlds) has those same stats for every
+row of the effects table: the total of every metric, every single-dimension
+slice in the series file, and the anomaly's root slice. The ground truth's
+`measured_effects` is its totals only; a node bound to a slice (paid sessions =
+`sessions` where `channel` is `paid_search`) looks itself up here by `metric`,
+`dimension`, `value`.
+
+**One verdict per anomaly and metric.** A twin's `moved` is one seed's opinion
+and it flips between seeds for small effects. `effects_summary.parquet` at the
+set root has a `verdict` per regime, anomaly, metric and slice:
+`established_up` / `established_down` (the mean across seeds is far enough from
+zero by the seeds' own spread, two-sided 1%), `open`, `exactly_zero` (no seed's
+twins ever differ) or `undefined`. Choose targets from it, not from one world.
+A small set (three seeds) can rarely reach the 1% bar (|t| ≥ 9.9), so the same
+file also has `verdict_10pct`, the same test at two-sided 10% (|t| ≥ 2.9 at
+three seeds), which establishes about one in ten effects that do not exist:
+use it only when the strict one cannot answer, and say so.
+`rel_change` is the relative change of the window mean of the *daily
+values*; for a rate that averages daily ratios. `rel_change_aggregated` (per
+twin and in the ground truth; `rel_change_aggregated_mean` / `_sd` / `_sem`
+across seeds) is the change of the metric's value over the window by its own
+`time_aggregation`: Σnumerator / Σdenominator for a rate, the last day for a
+stock, the formula over its inputs for a derived metric, NULL for a distinct
+count. Score a rate's attribution against the aggregated one.
+Effects are summarized for the anomaly's declared window only. For any other
+window, measure it from the two twins' series files by the recipe in
+`docs/eval_worlds_spec.md` §10.7; it reproduces the set's own numbers on the
+declared window.
+`aligned_before_start` says, per anomaly, metric and slice, whether every
+seed's twins were identical before the anomaly's start (then one twin's
+difference is clean before it and `first_diff` is exact);
+`aligned_before_start_share` is the share of seeds that were.
+`seeds_to_establish` / `seeds_to_establish_10pct` project how many seeds each
+row would need at each level. `worlds.json` → `verdicts` lists every verdict
+column with its `level`, `t_critical` at this set's seed count and `min_seeds`.
+
+**`*.series.parquet`** (every world: null, single, story) is the daily series
+of every metric, as MetricFlow would return it, so a consumer needs neither dbt
+nor the raw tables: `date`, `metric`, `dimension`, `value`, `metric_value`,
+`numerator`, `denominator`. It holds the total (`dimension` and `value` null)
+and one slice per dimension listed for the metric in `worlds.json` →
+`metrics[].dimensions`. Every timeline day is present; `metric_value` is null
+where the metric is undefined (a ratio over zero). `numerator` / `denominator`
+are filled where `metrics[].has_sides` is true: ratio metrics (their two input
+metrics) and averages (the sum and the row count). `metrics[].time_aggregation`
+says how each metric combines over time:
+
+- `sum`; `end_of_period` (a stock: MRR, open pipeline, the retail
+  `customer_base`, the wholesale `trade_inventory_build` — take the last day);
+- `ratio_of_sums`: sum `numerator` and `denominator`, then divide (never
+  average daily ratios); `average` works the same way from its sides;
+- `ratio_of_aggregates`: a ratio with a side that is not a sum.
+  `customer_churn_rate` divides churned subscriptions (a flow) by active
+  subscriptions (a stock); aggregate each side by
+  `metrics[].input_time_aggregation` and then divide;
+- `derived`: aggregate each input by `input_time_aggregation`, then evaluate
+  `formula`, a tree of `{"metric"}`, `{"const"}` and `{"op", "args"}` nodes
+  (`+ - * /`, `neg`, `nullif_zero`); `expr` is the same thing as SQL text;
+- `count_distinct` (DAU): not derivable for a longer period from the days;
+  the week is in the weekly series file (below). `rolling_window` (WAU): a
+  trailing window already, take the last day.
+
+`metrics[].measure_agg` is the measure's own aggregation. A stock with
+`measure_agg: count_distinct` (`active_subscriptions`) is the distinct count
+on each day; its end-of-week value is the last day's count, which is not what
+MetricFlow returns at week grain (distinct over the whole week).
+
+**`*.weekly_series.parquet`** answers those numbers. For every metric with
+`metrics[].has_weekly_series` (the simple `count_distinct` ones: `dau`,
+`paying_active_users`, `active_subscriptions` in B2C; other verticals have
+none and their worlds have no such file) it holds MetricFlow's
+`metric_time__week` value: `date` (the Monday starting the week), `metric`,
+`dimension`, `value`, `metric_value`, and `days`, the timeline days in that
+week (under 7 only at the timeline's two edges, where the count covers the
+days that exist). Totals and every single-dimension slice. The path is
+`worlds[].weekly_series`.
+
+A cumulative metric (`wau`, `rolling_window`) is a trailing window already;
+over a week take the last day. MetricFlow 0.13 instead returns its value on
+the week's *first* day; both are in the daily series.
+
+`time_aggregation` is how a metric's days *should* combine, and it is not
+always what `mf query --group-by metric_time__week` returns. Each metric says
+both: `metrics[].metricflow_week` is MetricFlow's rule (`sum_of_days`,
+`average_of_rows`, `distinct_over_week`, `first_day`, `ratio_of_week_inputs`,
+`derived_of_week_inputs`, `min_over_week`, `max_over_week`) and
+`matches_metricflow_week` says whether the two agree. They do not for stocks
+(MetricFlow adds up seven days of MRR), distinct counts, cumulative metrics,
+and ratios or formulas built on any of those.
+For a ratio or derived metric, `input_metricflow_week` gives each input's
+MetricFlow rule: `customer_churn_rate`'s denominator is `distinct_over_week`,
+so MetricFlow's weekly rate divides by the week's distinct active
+subscriptions from the weekly series file, not by the last day's count that
+`input_time_aggregation` (`end_of_period`) gives. Months are not served.
+
+**Read the measured numbers as effect plus noise.** A single world and its null
+twin share a seed, but most entity builders draw for the whole timeline from one
+stream, so the two realizations differ beyond the anomaly, often from the first
+day. One twin cannot confirm a small effect: `not_detected` means "did not clear
+this twin's noise", not "the generator left it alone". For the expected effect
+use `effects_summary.parquet` (`rel_change_mean`, `rel_change_sd`,
+`rel_change_sem`, `moved_share`, per regime, anomaly, metric and slice) and
+build more seeds until the standard error is small enough for your purpose.
+`fake_companies.effects` documents every number.
+
+The metric series are computed in-process from the vertical's dbt project
+(`fake_companies.semantic`), not by running dbt, so building a set needs the
+repo checkout but not the dbt extra. `--no-effects` skips them.
 
 ## Reference
 
