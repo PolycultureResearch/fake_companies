@@ -93,3 +93,6 @@ metrics:
       measure:
         name: net_inventory_units
         fill_nulls_with: 0
+      cumulative_type_params:
+        # A level: a week or month is its last day, not its first.
+        period_agg: last

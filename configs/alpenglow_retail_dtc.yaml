@@ -13,6 +13,11 @@
 #                                 tees units fall ~25%, total units do not move, and
 #                                 total revenue rises ~5% as baskets shift to pricier
 #                                 categories — measured, see docs/eval_worlds_spec.md §8)
+#
+# Scenarios added for the canonical tree (docs/canonical_trees.md): a pants
+# list-price increase, a paid-search suspension and an email conversion bug
+# in the same fortnight, a holiday organic shortfall, a slow organic
+# conversion drift, and an order-lines partial load.
 company:
   name: Alpenglow Supply Co.
   slug: alpenglow
@@ -217,6 +222,47 @@ anomalies:
       target: category_demand.tees
       window: { start: 2025-05-05, end: 2025-05-18 }
       magnitude: 0.7
+    # --- Scenarios for the canonical tree (docs/canonical_trees.md) -------- #
+    # A list-price change: pants +12% from July 2025, permanent. Within the
+    # category its price per unit moves; its share of units falls (elasticity
+    # 1.5) and total units do not move. Price versus mix, on avg_unit_price.
+    - name: pants_price_increase
+      kind: rate
+      type: level_shift
+      target: price.pants
+      window: { start: 2025-07-07 }
+      magnitude: 1.12
+    # Two causes at once, on different nodes: the paid-search account is
+    # suspended over a policy flag (spend near zero for two weeks), and in
+    # the same fortnight an email template bug halves email conversion.
+    - name: paid_search_account_suspended
+      kind: rate
+      type: level_shift
+      target: spend.paid_search
+      window: { start: 2025-08-11, end: 2025-08-24 }
+      magnitude: 0.05
+    - name: email_checkout_link_bug
+      kind: rate
+      type: level_shift
+      target: conversion_rate.email
+      window: { start: 2025-08-11, end: 2025-08-24 }
+      magnitude: 0.5
+    # A seasonal miss: a search-ranking update costs a quarter of organic
+    # traffic through the 2025 holiday peak.
+    - name: holiday_organic_shortfall
+      kind: rate
+      type: level_shift
+      target: sessions.organic
+      window: { start: 2025-11-10, end: 2025-12-28 }
+      magnitude: 0.75
+    # A slow drift, against the steps above: organic-landing conversion
+    # erodes to 80% over ten weeks (page weight creeping up) and stays there.
+    - name: organic_conversion_erosion
+      kind: rate
+      type: ramp
+      target: conversion_rate.organic
+      window: { start: 2026-01-12, end: 2026-03-22 }
+      magnitude: 0.8
     - name: orders_pipeline_dupes
       kind: dq
       type: duplicate_rows
@@ -236,6 +282,16 @@ anomalies:
       window: { start: 2025-06-09, end: 2025-06-12 }
       magnitude: 0.6
       params: { column: session_id }
+    # A data-quality break that moves metrics: the order-lines load drops
+    # 40% of rows for three days. Units and price-per-unit's inputs fall while
+    # gross revenue (from the orders table) does not, so the identity
+    # gross_revenue = units x avg_unit_price stops holding.
+    - name: order_items_partial_load
+      kind: dq
+      type: volume_dropout
+      target: shop_db.order_items
+      window: { start: 2025-09-15, end: 2025-09-17 }
+      magnitude: 0.6
   surprise:
     count: 2
     kinds: [rate, dq]

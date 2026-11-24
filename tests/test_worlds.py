@@ -275,8 +275,10 @@ def test_stocks_and_windows_are_marked_in_the_manifest(tmp_path):
     # what MetricFlow answers at week grain, and where the rule differs from it
     # (tests/test_semantic_matches_metricflow.py checks both against mf query)
     mfw = {m.name: (m.metricflow_week, m.matches_metricflow_week) for m in manifest.metrics}
-    assert mfw["mrr"] == ("sum_of_days", False)  # MetricFlow adds up seven days of a level
-    assert mfw["wau"] == ("first_day", False)
+    # Stocks report their last day to MetricFlow too (semi-additive snapshot
+    # measure; period_agg: last on a cumulative metric), spec §10.10.
+    assert mfw["mrr"] == ("last_day", True)
+    assert mfw["wau"] == ("last_day", True)
     assert mfw["dau"] == ("distinct_over_week", False)
     assert mfw["new_mrr"] == ("sum_of_days", True)
     assert mfw["visit_signup_rate"] == ("ratio_of_week_inputs", True)

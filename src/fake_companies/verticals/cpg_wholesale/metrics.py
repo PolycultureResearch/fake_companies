@@ -24,6 +24,19 @@ _DRIVER_METRICS: list[tuple[str, list[str]]] = [
     ("spend.", ["marketing_spend"]),  # decoupled: no downstream sales impact
     ("consumer_demand.", _SALES_METRICS),
     ("velocity.", _SALES_METRICS),
+    # A list-price change moves the realized price per case at once, and the
+    # volume through the shelf price and the category's elasticity.
+    ("price.", ["avg_case_price", *_SALES_METRICS]),
+    # A destock (or a pipeline fill): sell-in moves, sell-through does not.
+    (
+        "ordering.",
+        [
+            "shipped_cases",
+            "wholesale_gross_revenue",
+            "wholesale_net_revenue",
+            "trade_inventory_build",
+        ],
+    ),
 ]
 
 
@@ -34,6 +47,8 @@ _ROOTS: list[RootRule] = [
     ("spend.", "marketing_spend", "channel", {}),
     ("consumer_demand.", "pos_units", "category", {"banner": "retailer_banner"}),
     ("velocity.", "pos_units", "retailer_banner", {}),
+    ("price.", "avg_case_price", "category", {}),
+    ("ordering.", "shipped_cases", "channel_type", {}),
 ]
 
 

@@ -1,79 +1,270 @@
-# Breakdown metric tree for the Meridian (b2b_services) scenario.
+# Meridian Partners (b2b_services): the canonical Breakdown tree.
 #
-# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
-#   mf query --metrics <name> --group-by metric_time__day --csv
-# run inside the B2B dbt project (`provider.project_path`). The tree encodes
-# the pipeline funnel so Breakdown's Bayesian RCA can attribute a bookings
-# movement to its stage: an SDR-team lead drought starves every stage, a
-# healthcare proposal stall dents proposals -> wins with the pipeline lag, and
-# discounting creep cuts bookings without touching win counts.
+# The tree a revenue-operations analyst at a professional-services firm keeps:
+# the pipeline funnel, deal value, the sales cycle, and the road from bookings
+# to invoices to cash. It is the tree Breakdown's evaluation scores against
+# (eval-worlds spec §5 item 2; docs/canonical_trees.md says why it has this
+# shape and which scenarios the world set plants in it).
+#
+# Questions it answers:
+#   - Why did bookings drop this quarter: fewer wins, or smaller deals?
+#   - Fewer wins because the top of the funnel dried up, or because a stage
+#     stopped converting? Which stage, which industry, which lead source?
+#   - Is the sales cycle stretching? Are deals stalling (open pipeline up) or
+#     not arriving (open pipeline down)?
+#   - Bookings held but invoiced revenue fell: is delivery slipping?
+#   - Is cash collection keeping up with invoicing?
+#
+# Grain: every node is weekly. A B2B firm closes a few deals a day, each a
+# lognormal amount, and nothing at all at weekends; daily bookings are mostly
+# zeros and outliers. Weeks keep 100+ periods of history for the fits.
+#
+# Every node binds to a generator metric by name (`source`'s last part), so a
+# world set serves the tree with no bindings file. Dimension ids are the
+# MetricFlow `<entity>__<dimension>` names from the semantic layer.
+
+tree:
+  title: "Meridian Partners: pipeline to cash"
+  description: "Leads, stage conversion, deal size, bookings, invoicing and collections"
+
 provider:
   type: local
-  project_path: "../dbt/b2b_services" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+  project_path: "../dbt/b2b_services" # set FAKE_DB to the duckdb
 
 metrics:
+  # ------------------------------------------------------------------ funnel
+  # The stage counts are flows dated by stage entry. Each learned edge's
+  # coefficient is a stage's conversion at the lag that stage takes (stage
+  # durations: lead 4 days, qualified 9, proposal 13, negotiation 10), so the
+  # priors are the configured advance rates, wide. The share of a stage's
+  # exits landing outside the lagged week is in the local level.
   - name: leads
-    description: Deals created across lead sources.
-    seasonality:
-      - { period: 7, name: weekly }
+    description: "Deals created, from every lead source"
+    source: meridian.metrics.leads
+    grain: week
+    direction: up_is_good
+    trend: linear
+    dimensions:
+      source: deal__source
+      industry: deal__industry
+      size_tier: deal__size_tier
+      region: deal__region
 
   - name: qualified_deals
-    description: Deals passing the lead gate into qualified.
+    description: "Deals entering the qualified stage"
+    source: meridian.metrics.qualified_deals
+    grain: week
+    direction: up_is_good
     parents: [leads]
+    # No lag: the lead stage takes about four days, so most leads qualify in
+    # the week they arrive.
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.48, sigma: 0.08 } # lead -> qualified rate
-    seasonality:
-      - { period: 7, name: weekly }
+      coefficient: { distribution: Normal, params: { mu: 0.48, sigma: 0.2 } }
+    expected_signs: { leads: positive }
+    dimensions:
+      source: stage_event__source
+      industry: stage_event__industry
+      size_tier: stage_event__size_tier
 
   - name: proposals_sent
-    description: Qualified deals reaching proposal.
+    description: "Deals entering the proposal stage"
+    source: meridian.metrics.proposals_sent
+    grain: week
+    direction: up_is_good
     parents: [qualified_deals]
+    lags: { qualified_deals: 1 }
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.55, sigma: 0.08 }
+      coefficient: { distribution: Normal, params: { mu: 0.55, sigma: 0.25 } }
+    expected_signs: { qualified_deals: positive }
+    dimensions:
+      source: stage_event__source
+      industry: stage_event__industry
+      size_tier: stage_event__size_tier
 
   - name: negotiations
-    description: Proposals advancing to negotiation.
+    description: "Deals entering negotiation"
+    source: meridian.metrics.negotiations
+    grain: week
+    direction: up_is_good
     parents: [proposals_sent]
+    lags: { proposals_sent: 2 }
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.50, sigma: 0.08 }
+      coefficient: { distribution: Normal, params: { mu: 0.50, sigma: 0.25 } }
+    expected_signs: { proposals_sent: positive }
+    dimensions:
+      source: stage_event__source
+      industry: stage_event__industry
+      size_tier: stage_event__size_tier
 
+  # The sales cycle: mean days from creation to close over the deals won that
+  # week. A source node, because it is where a slowdown enters (a legal or
+  # procurement backlog stretches every stage). Its window value is
+  # Σ cycle days / Σ wins, hence the denominator.
+  - name: sales_cycle_days
+    description: "Mean days from deal creation to close, over deals won"
+    source: meridian.metrics.sales_cycle_days
+    grain: week
+    kind: rate
+    denominator: deals_won
+    direction: down_is_good
+    format: { style: number, unit: days, decimals: 0 }
+    dimensions:
+      industry: won_deal__industry
+      size_tier: won_deal__size_tier
+      source: won_deal__source
+
+  # Wins come out of negotiation about ten days later; slower cycles hold
+  # them back. The second parent is the analyst's model of a stall, and the
+  # fit decides how much of it the history supports.
   - name: deals_won
-    description: Negotiations closing won.
-    parents: [negotiations]
+    description: "Deals closed won, by close date"
+    source: meridian.metrics.deals_won
+    grain: week
+    direction: up_is_good
+    parents: [negotiations, sales_cycle_days]
+    lags: { negotiations: 1 }
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.62, sigma: 0.08 }
+      negotiations: { distribution: Normal, params: { mu: 0.62, sigma: 0.25 } }
+    expected_signs: { negotiations: positive, sales_cycle_days: negative }
+    dimensions:
+      industry: won_deal__industry
+      size_tier: won_deal__size_tier
+      source: won_deal__source
 
+  # Most losses are disqualified leads, a few days after they arrive.
+  - name: deals_lost
+    description: "Deals closed lost, at any stage, by close date"
+    source: meridian.metrics.deals_lost
+    grain: week
+    direction: down_is_good
+    parents: [leads]
+    expected_signs: { leads: positive }
+    dimensions:
+      stage: stage_event__stage
+      industry: stage_event__industry
+      source: stage_event__source
+
+  - name: closed_deals
+    description: "Deals closed either way"
+    source: meridian.metrics.closed_deals
+    grain: week
+    direction: neutral
+    formula: "deals_won + deals_lost"
+    parents: [deals_won, deals_lost]
+
+  # Win rate over deals closed that week. It is a close-date ratio, so a lead
+  # drought briefly *raises* it (losses at the lead stage fall at once, wins
+  # weeks later); read it next to the funnel, not instead of it. MetricFlow
+  # exposes no dimension on this ratio, so slice deals_won instead.
+  - name: win_rate
+    description: "Share of deals closed that week that were won"
+    source: meridian.metrics.win_rate
+    grain: week
+    kind: rate
+    share: true
+    direction: up_is_good
+    format: { style: percent, decimals: 1 }
+    formula: "deals_won / closed_deals"
+    parents: [deals_won, closed_deals]
+
+  # ------------------------------------------------------------------- value
   - name: avg_deal_size
-    description: Average closed-won deal value.
-    seasonality:
-      - { period: 7, name: weekly }
+    description: "Average value of a deal won"
+    source: meridian.metrics.avg_deal_size
+    grain: week
+    kind: rate
+    denominator: deals_won
+    direction: up_is_good
+    format: currency
+    dimensions:
+      industry: won_deal__industry
+      size_tier: won_deal__size_tier
+      source: won_deal__source
 
-  # Value identity: bookings = wins x average deal size (deterministic node).
+  # The identity a bookings review starts from: volume times price. Slicing
+  # avg_deal_size by size tier separates a discount (within) from a shift
+  # toward smaller accounts (mix).
   - name: bookings
-    description: Closed-won value.
-    parents: [deals_won, avg_deal_size]
+    description: "Value of deals closed won"
+    source: meridian.metrics.bookings
+    grain: week
+    direction: up_is_good
+    format: currency
     formula: "deals_won * avg_deal_size"
+    parents: [deals_won, avg_deal_size]
+    dimensions:
+      industry: won_deal__industry
+      size_tier: won_deal__size_tier
+      source: won_deal__source
 
+  # ---------------------------------------------------------------- pipeline
+  # Stocks: the deals open at the end of the week and their value. More leads
+  # fill it; slower cycles hold deals in it longer. Bookings down with the
+  # open pipeline up is a stall; both down is a demand problem.
+  - name: open_deals
+    description: "Deals open at the end of the week"
+    source: meridian.metrics.open_deals
+    grain: week
+    kind: stock
+    direction: neutral
+    parents: [leads, sales_cycle_days]
+    expected_signs: { leads: positive, sales_cycle_days: positive }
+    trend: { type: linear, sigma: 0.2 }
+    dimensions:
+      industry: deal_day__industry
+      size_tier: deal_day__size_tier
+      source: deal_day__source
+
+  - name: open_pipeline_value
+    description: "Value of the deals open at the end of the week"
+    source: meridian.metrics.open_pipeline_value
+    grain: week
+    kind: stock
+    direction: up_is_good
+    format: currency
+    parents: [open_deals]
+    priors:
+      coefficient: { distribution: Normal, params: { mu: 45000, sigma: 20000 } }
+    expected_signs: { open_deals: positive }
+    trend: { type: linear, sigma: 0.2 }
+    dimensions:
+      industry: deal_day__industry
+      size_tier: deal_day__size_tier
+      source: deal_day__source
+
+  # ----------------------------------------------------------- billing, cash
+  # 40% is invoiced at signing and the balance at delivery, about two months
+  # later. A node has one lag per parent, so the edge carries the upfront
+  # share in the same week and the delivery balance sits in the level: a
+  # delivery slowdown shows here as an innovation with bookings unmoved.
+  # Slice by `kind` to see which invoices are missing.
   - name: invoiced_revenue
-    description: Invoice value issued (upfront at signing + balance at delivery).
+    description: "Invoices issued: upfront at signing, balance at delivery"
+    source: meridian.metrics.invoiced_revenue
+    grain: week
+    direction: up_is_good
+    format: currency
     parents: [bookings]
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.9, sigma: 0.2 } # bookings -> invoicing with delivery lag
+      coefficient: { distribution: Normal, params: { mu: 0.4, sigma: 0.2 } }
+    expected_signs: { bookings: positive }
+    trend: linear
+    dimensions:
+      kind: invoice__kind
+      status: invoice__status
 
+  # Net 30, with about a quarter of invoices paid two to three weeks late.
   - name: collected_cash
-    description: Payments received (net-30 with a late tail).
+    description: "Payments received"
+    source: meridian.metrics.collected_cash
+    grain: week
+    direction: up_is_good
+    format: currency
     parents: [invoiced_revenue]
+    lags: { invoiced_revenue: 4 }
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.95, sigma: 0.1 }
+      coefficient: { distribution: Normal, params: { mu: 0.7, sigma: 0.3 } }
+    expected_signs: { invoiced_revenue: positive }
+    trend: linear
+    dimensions:
+      method: payment__method

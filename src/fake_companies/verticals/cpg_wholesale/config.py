@@ -33,6 +33,9 @@ class CategoryConfig(_Base):
     case_price_max: float
     retail_markup: float = 1.65  # msrp = (case_price / case_size) * markup
     popularity: float = 1.0  # relative consumer-demand weight
+    # Shopper response to a list-price change (the ``price.<category>``
+    # driver), passed through to the shelf: POS units x price ** -elasticity.
+    price_elasticity: float = 1.2
 
 
 class CatalogConfig(_Base):

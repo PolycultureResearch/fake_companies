@@ -65,9 +65,32 @@ _DRIVER_METRICS: list[tuple[str, list[str]]] = [
     # category, which is this driver's root slice (see _ROOTS).
     (
         "category_demand.",
-        ["gross_revenue", "net_revenue", "gross_margin", "aov", "margin_rate"],
+        [
+            "avg_unit_price",
+            "item_revenue",
+            "gross_revenue",
+            "net_revenue",
+            "gross_margin",
+            "aov",
+            "margin_rate",
+        ],
     ),
     ("return_rate.", ["return_rate", "refunds", "net_revenue"]),
+    # A list-price change: the category's own price per unit moves (`within`),
+    # and its share of basket lines falls by the price elasticity (`mix`), so
+    # total units still do not move. Revenue, AOV and margin follow the price.
+    (
+        "price.",
+        [
+            "avg_unit_price",
+            "item_revenue",
+            "gross_revenue",
+            "net_revenue",
+            "gross_margin",
+            "aov",
+            "margin_rate",
+        ],
+    ),
 ]
 
 
@@ -80,8 +103,10 @@ _DRIVER_METRICS: list[tuple[str, list[str]]] = [
 # ``return_rate.<category>`` roots at ``returned_units``, not ``return_rate``,
 # because the ratio's two sides sit on different semantic models and no single
 # group-by addresses its category. ``category_demand.<category>`` roots at
-# ``units`` *by category*: it reweights the basket mix, so total units barely
-# move and the anomaly is visible only in the slice.
+# ``units`` *by category*: it reweights the basket mix, so total units do not
+# move and the anomaly is visible only in the slice; the total it moves is
+# ``avg_unit_price``, by mix (``_ROOT_MIXES``). ``price.<category>`` roots at
+# ``avg_unit_price`` by category: the category's own price per unit changed.
 _ROOTS: list[RootRule] = [
     ("spend.", "marketing_spend", "channel", {}),
     ("sessions.", "sessions", "channel", {}),
@@ -90,6 +115,7 @@ _ROOTS: list[RootRule] = [
     ("repeat_rate", "returning_customer_orders", None, {}),
     ("category_demand.", "units", "category", {}),
     ("return_rate.", "returned_units", "category", {}),
+    ("price.", "avg_unit_price", "category", {}),
 ]
 
 
@@ -138,6 +164,10 @@ def affected_metrics_for_driver(driver: str) -> list[str]:
 # one MetricFlow group-by, which is why it is not the root).
 _ROOT_RATES = {"returned_units": "return_rate"}
 
+# Drivers whose anomaly is a mix shift -> the ratio whose total it moves (the
+# root slice's share of that ratio's denominator is what changed).
+_ROOT_MIXES = {"category_demand.": "avg_unit_price"}
+
 
 def root_label_for_driver(driver: str, segment: dict[str, str] | None = None) -> RootLabel:
-    return resolve_root(_ROOTS, driver, segment, _ROOT_RATES)
+    return resolve_root(_ROOTS, driver, segment, _ROOT_RATES, _ROOT_MIXES)

@@ -78,6 +78,7 @@ def apply_rate_events(
                 root_value=label.value if label else None,
                 root_slice=(label.slice or None) if label else None,
                 root_metric_rate=label.rate if label else None,
+                root_metric_mix=label.mix if label else None,
             )
         )
     return panel, records

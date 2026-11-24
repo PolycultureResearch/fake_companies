@@ -221,6 +221,11 @@ semantic_models:
         description: Active monthly recurring revenue (as-of each day).
         agg: sum
         expr: mrr_amount
+        # A snapshot (one row per active subscription per day): at a week or month take
+        # the last day's level, do not add seven days of it up.
+        non_additive_dimension:
+          name: date_day
+          window_choice: max
       - name: active_subscriptions
         description: Distinct active subscriptions on each day.
         agg: count_distinct

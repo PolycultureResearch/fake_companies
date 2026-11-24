@@ -48,6 +48,12 @@ class RootLabel:
     # at returned_units; the rate is return_rate). A tree whose node is the
     # rate matches on this.
     rate: str | None = None
+    # The ratio metric a *mix shift* moves, when the driver reweights the
+    # root slice's share of that ratio's denominator and leaves the root's
+    # total alone (category_demand.<cat> roots at units[category]; total
+    # units do not move, revenue per unit does). A tree whose node is that
+    # ratio matches on this.
+    mix: str | None = None
 
     @property
     def dimension(self) -> str | None:
@@ -72,11 +78,13 @@ def resolve_root(
     driver: str,
     segment: dict[str, str] | None,
     rates: dict[str, str] | None = None,
+    mixes: dict[str, str] | None = None,
 ) -> RootLabel:
     """Look ``driver`` up in a vertical's root table and build its label.
 
     ``rates`` maps a root metric that is a numerator count to the rate metric
-    the driver is named after."""
+    the driver is named after. ``mixes`` maps a driver prefix (as in
+    ``rules``) whose anomaly is a mix shift to the ratio metric it moves."""
     for prefix, metric, member_dim, segment_dims in rules:
         if prefix.endswith("."):
             if not driver.startswith(prefix):
@@ -93,7 +101,7 @@ def resolve_root(
             dim = segment_dims.get(key)
             if dim is not None and dim not in where:
                 where[dim] = segment[key]  # type: ignore[index]
-        return RootLabel(metric, where, (rates or {}).get(metric))
+        return RootLabel(metric, where, (rates or {}).get(metric), (mixes or {}).get(prefix))
     raise KeyError(f"driver {driver!r} has no root metric")
 
 

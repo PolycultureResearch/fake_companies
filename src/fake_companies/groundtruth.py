@@ -44,6 +44,10 @@ class GroundTruthRecord(BaseModel):
     # When the root is a rate's numerator count (returned_units,
     # churned_subscriptions), the rate metric itself; otherwise null.
     root_metric_rate: str | None = None
+    # When the anomaly is a mix shift (it moves the root slice's share of a
+    # ratio's denominator and leaves the root's total alone), that ratio
+    # metric, whose total does move; otherwise null.
+    root_metric_mix: str | None = None
 
     # --- Measured truth (single worlds of a world set only) ----------------- #
     # Filled from the difference between a single world and its null twin; see

@@ -193,6 +193,32 @@ def test_root_label_rules():
     )
     assert REGISTRY["b2c_saas"].root_label("churn.pro").rate == "customer_churn_rate"
     assert retail.root_label("spend.paid_social").rate is None
+    # A mix shift keeps its root at the slice it entered by, and names the
+    # ratio whose total it moves; a price change roots at that ratio's slice.
+    tees = retail.root_label("category_demand.tees")
+    assert (tees.metric, tees.slice, tees.mix) == ("units", {"category": "tees"}, "avg_unit_price")
+    assert retail.root_label("price.hoodies") == RootLabel(
+        "avg_unit_price", {"category": "hoodies"}
+    )
+    assert retail.root_label("price.hoodies").mix is None
+    assert cpg.root_label("ordering.mass") == RootLabel("shipped_cases", {"channel_type": "mass"})
+    assert cpg.root_label("price.teas") == RootLabel("avg_case_price", {"category": "teas"})
+    b2b = REGISTRY["b2b_services"]
+    assert b2b.root_label("delivery_time_scale") == RootLabel("invoiced_revenue", {})
+
+
+@pytest.mark.parametrize("name", VERTICALS)
+def test_late_drivers_stay_out_of_the_surprise_pool(name, smoke_cfgs):
+    """Drivers added after a vertical's surprise pool was fixed are anomaly
+    targets but never surprise-sampled, so adding them moved no surprise."""
+    v = REGISTRY[name]
+    cfg = smoke_cfgs[name]
+    pool = getattr(v, "surprise_drivers", None)
+    if pool is None:
+        return
+    late = v.known_drivers(cfg) - pool(cfg)
+    assert pool(cfg) <= v.known_drivers(cfg)
+    assert all(d.split(".")[0] in {"price", "ordering", "delivery_time_scale"} for d in late)
 
 
 @pytest.mark.parametrize("name", VERTICALS)
@@ -216,7 +242,15 @@ def test_declared_effects_match_what_was_measured():
     """
     retail = REGISTRY["retail_dtc"].affected_metrics("category_demand.tees")
     assert "units" not in retail and "orders" not in retail
-    assert {"gross_revenue", "net_revenue", "gross_margin", "aov", "margin_rate"} == set(retail)
+    assert {
+        "avg_unit_price",
+        "item_revenue",
+        "gross_revenue",
+        "net_revenue",
+        "gross_margin",
+        "aov",
+        "margin_rate",
+    } == set(retail)
     b2b = REGISTRY["b2b_services"].affected_metrics("cycle_time_scale")
     assert {"bookings", "deals_won", "negotiations", "proposals_sent", "invoiced_revenue"} <= set(
         b2b

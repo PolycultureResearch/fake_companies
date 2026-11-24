@@ -17,7 +17,7 @@ from ....core import RngHub
 from ....core.calendar import Calendar
 from ..config import CPGWholesaleScenarioConfig as ScenarioConfig
 from .catalog import ProductIndex
-from .pos import promo_grids
+from .pos import price_grid, promo_grids, weekly_mean
 
 
 def build_shipments(
@@ -26,6 +26,7 @@ def build_shipments(
     rng: RngHub,
     products: ProductIndex,
     accounts: pd.DataFrame,
+    panel,
     pos_units: np.ndarray,  # (W, B, P)
     starts: np.ndarray,
 ) -> pd.DataFrame:
@@ -40,17 +41,22 @@ def build_shipments(
     demand = np.concatenate([pos_units[:1], pos_units[:-1]], axis=0).astype(float)
 
     _, disc = promo_grids(cfg, cal, starts, banners, categories)  # (W, B, C)
+    price = price_grid(cfg, panel, starts, categories)  # (W, C)
     cat_of_p = products.product_cat_idx
 
     # Account -> (banner index, demand share) from the accounts frame.
     acct_banner = [banners.index(b) for b in accounts["banner"]]
     acct_share = accounts["share"].to_numpy(dtype=float)
+    acct_channel_type = accounts["channel_type"].to_numpy(dtype=object)
     n_a = len(acct_banner)
 
     rows_w, rows_a, rows_p, rows_cases, rows_disc = [], [], [], [], []
     for ai in range(n_a):  # <= ~10 accounts, not per-entity
         b = acct_banner[ai]
-        share_demand = demand[:, b, :] * acct_share[ai]  # (W, P)
+        # How much of last week's sell-through the account reorders: 1.0
+        # unless an ordering anomaly (a destock, a pipeline fill) moves it.
+        reorder = weekly_mean(panel.get(f"ordering.{acct_channel_type[ai]}"), starts)
+        share_demand = demand[:, b, :] * acct_share[ai] * reorder[:, None]  # (W, P)
         noise = np.exp(
             gen.normal(0.0, oc.order_noise_sigma, size=(n_w, n_p)) - 0.5 * oc.order_noise_sigma**2
         )
@@ -92,7 +98,7 @@ def build_shipments(
         ship_day.astype("int64") * 86400 + secs.astype("int64")
     ).astype("timedelta64[s]")
 
-    case_price = products.case_prices[p_ix]
+    case_price = products.case_prices[p_ix] * price[w_ix, cat_of_p[p_ix]]
     gross = np.round(cases * case_price, 2)
     discount = np.round(gross * disc_pct, 2)
 

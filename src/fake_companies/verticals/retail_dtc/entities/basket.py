@@ -42,11 +42,20 @@ def build_baskets(
     n_lines = len(line_order_pos)
     line_day = day_idx[line_order_pos]
 
-    # Per-day category mix: popularity x category_demand, normalized + cumsum.
+    # Per-day category mix: popularity x category_demand x price response,
+    # normalized + cumsum. The list-price index is exactly 1.0 unless a price
+    # anomaly moves it, and then 1.0 ** -e leaves the weights bit-identical.
     n_cats = len(catalog.categories)
     weights = np.empty((cal.n_days, n_cats))
+    price = np.empty((cal.n_days, n_cats))
     for ci, cat in enumerate(catalog.categories):
-        weights[:, ci] = catalog.popularity[ci] * panel.get(f"category_demand.{cat}")
+        price[:, ci] = panel.get(f"price.{cat}")
+        elasticity = cfg.catalog.categories[cat].price_elasticity
+        weights[:, ci] = (
+            catalog.popularity[ci]
+            * panel.get(f"category_demand.{cat}")
+            * price[:, ci] ** -elasticity
+        )
     probs = weights / weights.sum(axis=1, keepdims=True)
     cum = np.cumsum(probs, axis=1)
 
@@ -55,7 +64,7 @@ def build_baskets(
     sku_pos = catalog.sku_for_category(cat_idx, gen.random(n_lines))
 
     quantity = 1 + (gen.random(n_lines) < cfg.basket.extra_quantity_rate).astype(np.int64)
-    unit_price = catalog.prices[sku_pos]
+    unit_price = catalog.prices[sku_pos] * price[line_day, cat_idx]
     line_amount = np.round(quantity * unit_price, 2)
 
     order_ids = skeleton["order_id"].to_numpy()

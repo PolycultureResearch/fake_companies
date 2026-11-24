@@ -1,90 +1,274 @@
-# Breakdown metric tree for the Alpenglow (retail_dtc) scenario.
+# Alpenglow Supply Co. (retail_dtc): the canonical Breakdown tree.
 #
-# Feeds Breakdown's LocalDataFetcher: each `name` is queried via
-#   mf query --metrics <name> --group-by metric_time__day --csv
-# run inside the retail dbt project (`provider.project_path`). The tree encodes
-# the acquisition -> orders -> revenue chain plus the returns drag, so
-# Breakdown's Bayesian RCA can attribute a net-revenue movement back to its
-# driver (a paid-social budget cut cascading to sessions -> orders -> revenue,
-# a mobile checkout bug denting conversion, or a jackets sizing recall lifting
-# refunds weeks after the orders were placed).
+# The tree an e-commerce analyst at a direct-to-consumer apparel brand keeps:
+# traffic and conversion, first and repeat orders, units, price per unit and
+# the category mix behind it, discounts, returns, and margin. It is the tree
+# Breakdown's evaluation scores against (eval-worlds spec §5 item 2;
+# docs/canonical_trees.md says why it has this shape and which scenarios the
+# world set plants in it).
+#
+# It descends from Breakdown's benchmark tree (demo/alpenglow_tree.yml on the
+# eval-runner branch), which grew the scenario tree's nine-flow chain into
+# rates, a stock and identities. Two changes from that tree:
+#   - every node binds to a generator metric by name, so a world set serves it
+#     with no bindings file (sessions is one node, sliced by channel, instead
+#     of four channel nodes bound to slices);
+#   - revenue is units x price per unit instead of orders x AOV, because the
+#     category mix lives in units, not orders: a category-demand shift moves
+#     neither orders nor total units, only what each unit sells for.
+#
+# Questions it answers:
+#   - Why did net revenue drop: traffic, conversion, basket, price, discounts
+#     or returns?
+#   - Traffic: which channel? Was it the spend we cut?
+#   - Conversion: which device, country, channel?
+#   - Revenue up with units flat: did prices rise (`within`), or did shoppers
+#     move to dearer categories (`mix`)? Slice avg_unit_price by category.
+#   - Is the margin decline price, mix or cost? margin_rate, and gross_margin
+#     by category.
+#   - Are returns up, in which category?
+#
+# Grain: daily for the funnel; weekly for returns (a return is dated by its
+# request, a week or two after the order, and the return rate's two sides
+# are counted on different days) and for net revenue, which nets them.
+
+tree:
+  title: "Alpenglow Supply Co.: traffic to net revenue"
+  description: "Spend, sessions, conversion, repeat orders, units, price and mix, discounts, returns, margin"
+
 provider:
   type: local
-  project_path: "../dbt/retail_dtc" # dir where `mf query` runs (set FAKE_DB to the duckdb)
+  project_path: "../dbt/retail_dtc" # set FAKE_DB to the duckdb
 
 metrics:
+  # ------------------------------------------------------------- acquisition
   - name: marketing_spend
-    description: Paid acquisition spend across channels.
+    description: "Ad-platform spend, paid search plus paid social"
+    source: alpenglow.metrics.marketing_spend
+    direction: neutral
+    format: currency
     seasonality:
       - { period: 7, name: weekly }
-      - { period: 365, name: annual }
+    dimensions:
+      channel: spend__channel
 
+  # Only the paid channels respond to spend (organic, email and direct do
+  # not), so the coefficient is paid sessions per dollar, about 0.8; the
+  # earned channels are in the level. Slice by channel to see which moved.
   - name: sessions
-    description: Web sessions (paid channels scale with spend).
+    description: "Web sessions, bought and earned"
+    source: alpenglow.metrics.sessions
+    direction: up_is_good
     parents: [marketing_spend]
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 2.5, sigma: 0.6 } # ~sessions per $ of spend
+      coefficient: { distribution: Normal, params: { mu: 0.8, sigma: 0.4 } }
+    expected_signs: { marketing_spend: positive }
+    trend: linear
     seasonality:
       - { period: 7, name: weekly }
-      - { period: 365, name: annual }
+    dimensions:
+      channel: session__channel
+      device: session__device
+      country: session__country
+
+  - name: conversion_rate
+    description: "Share of sessions that place a first order"
+    source: alpenglow.metrics.conversion_rate
+    kind: rate
+    denominator: sessions
+    share: true
+    direction: up_is_good
+    format: { style: percent, decimals: 2 }
+    seasonality:
+      - { period: 7, name: weekly }
+    dimensions:
+      channel: session__channel
+      device: session__device
+      country: session__country
+
+  # A session converts at most once and a conversion is a customer's first
+  # order, so this is the count of new customers.
+  - name: converting_sessions
+    description: "Sessions that placed an order: new customers"
+    source: alpenglow.metrics.converting_sessions
+    direction: up_is_good
+    formula: "sessions * conversion_rate"
+    parents: [sessions, conversion_rate]
+    dimensions:
+      channel: session__channel
+      device: session__device
+      country: session__country
+
+  # ------------------------------------------------------------------ repeat
+  # The stock repeat orders are drawn from: customers acquired to date. It is
+  # the running total of converting_sessions, which a tree cannot state as an
+  # edge (an edge is level on level, not an integral), so it is a source.
+  - name: customer_base
+    description: "Customers acquired to date"
+    source: alpenglow.metrics.customer_base
+    kind: stock
+    direction: up_is_good
+    dimensions:
+      country: customer__country
+      first_channel: customer__first_channel
+
+  - name: returning_customer_orders
+    description: "Orders from existing customers"
+    source: alpenglow.metrics.returning_customer_orders
+    direction: up_is_good
+    parents: [customer_base]
+    expected_signs: { customer_base: positive }
+    seasonality:
+      - { period: 7, name: weekly }
+    dimensions:
+      channel: order__channel
+      country: order__country
 
   - name: orders
-    description: Orders placed (session conversion plus repeat purchases).
-    parents: [sessions]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.02, sigma: 0.006 } # site conversion rate
-    seasonality:
-      - { period: 7, name: weekly }
+    description: "Orders placed, first and repeat"
+    source: alpenglow.metrics.orders
+    direction: up_is_good
+    formula: "converting_sessions + returning_customer_orders"
+    parents: [converting_sessions, returning_customer_orders]
+    dimensions:
+      channel: order__channel
+      device: order__device
+      country: order__country
 
-  - name: new_customers
-    description: First orders (customer acquisition).
-    parents: [orders]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.45, sigma: 0.10 } # first-order share of orders
-
+  # ----------------------------------------------------------------- revenue
+  # Lines per order and quantity per line. The coefficient is units per
+  # order, about 1.9.
   - name: units
-    description: Units sold across order lines.
+    description: "Units sold"
+    source: alpenglow.metrics.units
+    direction: up_is_good
     parents: [orders]
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 1.9, sigma: 0.3 } # units per order
-
-  - name: gross_revenue
-    description: Merchandise revenue before discounts and refunds.
-    parents: [orders]
-    priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 130.0, sigma: 25.0 } # ~AOV
+      coefficient: { distribution: Normal, params: { mu: 1.9, sigma: 0.4 } }
+    expected_signs: { orders: positive }
     seasonality:
       - { period: 7, name: weekly }
-      - { period: 365, name: annual }
+    dimensions:
+      category: order_item__category
+
+  # Merchandise revenue per unit. Its change, sliced by category, splits
+  # into `within` (a category's own price moved) and `mix` (units moved
+  # between cheap and dear categories). That split is the price-versus-mix
+  # answer, and the reason this tree slices instead of carrying a node per
+  # category: a mix shift has no gap in any one total for a per-category
+  # node to explain, but it has one here.
+  - name: avg_unit_price
+    description: "Merchandise revenue per unit sold, before discounts"
+    source: alpenglow.metrics.avg_unit_price
+    kind: rate
+    denominator: units
+    direction: up_is_good
+    format: currency
+    dimensions:
+      category: order_item__category
+
+  # Orders' gross amount is the sum of their lines, so this holds to the cent.
+  - name: gross_revenue
+    description: "Merchandise revenue before discounts and refunds"
+    source: alpenglow.metrics.gross_revenue
+    direction: up_is_good
+    format: currency
+    formula: "units * avg_unit_price"
+    parents: [units, avg_unit_price]
+    dimensions:
+      channel: order__channel
+      device: order__device
+      country: order__country
+
+  # Zero outside a promotion. Promotions are planned, so the edge is the
+  # discount per discounted order and the planned calendar is the cause.
+  - name: discounted_orders
+    description: "Orders that used a promo code"
+    source: alpenglow.metrics.discounted_orders
+    direction: neutral
+    dimensions:
+      channel: order__channel
 
   - name: discounts
-    description: Promo discounts given.
-    parents: [gross_revenue]
+    description: "Promo discounts given"
+    source: alpenglow.metrics.discounts
+    direction: down_is_good
+    format: currency
+    parents: [discounted_orders]
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.03, sigma: 0.02 } # discount share of gross
+      coefficient: { distribution: Normal, params: { mu: 30.0, sigma: 15.0 } }
+    expected_signs: { discounted_orders: positive }
+    dimensions:
+      channel: order__channel
+
+  # ----------------------------------------------------------------- returns
+  - name: return_rate
+    description: "Units returned per unit sold, each counted in its own week"
+    source: alpenglow.metrics.return_rate
+    grain: week
+    kind: rate
+    denominator: units
+    direction: down_is_good
+    format: { style: percent, decimals: 1 }
+    # No dimensions: its sides sit on different semantic models (returns by
+    # request date, order lines by order date), so MetricFlow cannot slice
+    # it. Slice returned_units by category instead.
+
+  - name: returned_units
+    description: "Units returned, dated by the return request"
+    source: alpenglow.metrics.returned_units
+    grain: week
+    direction: down_is_good
+    formula: "units * return_rate"
+    parents: [units, return_rate]
+    dimensions:
+      category: return__category
+      reason: return__reason
 
   - name: refunds
-    description: Refund value of returns (lags orders by delivery + request time).
-    parents: [gross_revenue]
+    description: "Refund value of returns"
+    source: alpenglow.metrics.refunds
+    grain: week
+    direction: down_is_good
+    format: currency
+    parents: [returned_units]
     priors:
-      coefficient:
-        distribution: Normal
-        params: { mu: 0.05, sigma: 0.02 } # refund share of gross
+      coefficient: { distribution: Normal, params: { mu: 70.0, sigma: 30.0 } }
+    expected_signs: { returned_units: positive }
+    dimensions:
+      category: return__category
+      reason: return__reason
 
-  # Revenue identity: net = gross - discounts - refunds (deterministic node).
+  # -------------------------------------------------------------------- apex
   - name: net_revenue
-    description: Net merchandise revenue.
-    parents: [gross_revenue, discounts, refunds]
+    description: "Gross revenue less discounts and refunds"
+    source: alpenglow.metrics.net_revenue
+    grain: week
+    direction: up_is_good
+    format: currency
     formula: "gross_revenue - discounts - refunds"
+    parents: [gross_revenue, discounts, refunds]
+
+  # ------------------------------------------------------------------ margin
+  # Merchandise margin over merchandise revenue. With unit costs fixed it
+  # moves with price and with the mix of categories; slice gross_margin by
+  # category to see where. (Its two sides sit on different semantic models,
+  # so MetricFlow exposes no dimension on the rate itself.)
+  - name: margin_rate
+    description: "Merchandise margin as a share of gross revenue"
+    source: alpenglow.metrics.margin_rate
+    kind: rate
+    denominator: gross_revenue
+    share: true
+    direction: up_is_good
+    format: { style: percent, decimals: 1 }
+
+  - name: gross_margin
+    description: "Merchandise revenue less unit cost"
+    source: alpenglow.metrics.gross_margin
+    direction: up_is_good
+    format: currency
+    formula: "gross_revenue * margin_rate"
+    parents: [gross_revenue, margin_rate]
+    dimensions:
+      category: order_item__category

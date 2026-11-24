@@ -34,7 +34,18 @@ def known_drivers(cfg: ScenarioConfig) -> set[str]:
     for cat in cfg.catalog.categories:
         names.add(f"category_demand.{cat}")
         names.add(f"return_rate.{cat}")
-    return names
+    return names | price_drivers(cfg)
+
+
+def price_drivers(cfg: ScenarioConfig) -> set[str]:
+    """``price.<category>``: a list-price index per category, 1.0 unless an
+    anomaly moves it. Added after the surprise pool was fixed, so it stays out
+    of it (a surprise one-day price spike is not a story anyone tells)."""
+    return {f"price.{cat}" for cat in cfg.catalog.categories}
+
+
+def surprise_drivers(cfg: ScenarioConfig) -> set[str]:
+    return known_drivers(cfg) - price_drivers(cfg)
 
 
 def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPanel:
@@ -80,6 +91,12 @@ def build_drivers(cfg: ScenarioConfig, cal: Calendar, rng: RngHub) -> DriverPane
         panel.set(f"category_demand.{cat}", noise(f"category_demand.{cat}", 1.0))
         base = cfg.returns.rate.get(cat, cfg.returns.rate_default)
         panel.set(f"return_rate.{cat}", _prob(base * noise(f"return_rate.{cat}", 0.5)))
+
+    # --- per-category list-price index (exactly 1.0 unless an anomaly moves
+    # it). No noise and no stream: list prices do not wobble day to day, and
+    # a flat index leaves every draw and every byte as it was. --------------- #
+    for cat in cfg.catalog.categories:
+        panel.set(f"price.{cat}", np.ones(n))
 
     return panel
 

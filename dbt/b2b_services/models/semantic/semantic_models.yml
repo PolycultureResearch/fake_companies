@@ -153,10 +153,20 @@ semantic_models:
         description: Deals open on the day.
         agg: sum
         expr: 1
+        # A snapshot (one row per open deal per day): at a week or month take
+        # the last day's level, do not add seven days of it up.
+        non_additive_dimension:
+          name: date_day
+          window_choice: max
       - name: open_pipeline_value
         description: Value of deals open on the day.
         agg: sum
         expr: amount
+        # A snapshot (one row per open deal per day): at a week or month take
+        # the last day's level, do not add seven days of it up.
+        non_additive_dimension:
+          name: date_day
+          window_choice: max
 
   # ----------------------------------------------------------------------- #
   # Billing

@@ -47,7 +47,11 @@ def verify_breakdown(
     start: str, end: str, dbt_dir: Path, tree_file: str
 ) -> list[tuple[str, bool, str]]:
     tree = yaml.safe_load((ROOT / "examples" / tree_file).read_text())
-    metrics = [m["name"] for m in tree["metrics"]]
+    # A node is the metric its `source` names (the last dotted part), which
+    # need not be the node's name; a derived node (no source) fetches nothing.
+    metrics = list(
+        dict.fromkeys(m["source"].split(".")[-1] for m in tree["metrics"] if m.get("source"))
+    )
     env = {**os.environ, "DBT_PROFILES_DIR": str(dbt_dir), "FAKE_DB": str(_fake_db())}
     mf = str(ROOT / ".venv" / "bin" / "mf")
     results = []

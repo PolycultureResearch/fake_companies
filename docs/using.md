@@ -368,17 +368,21 @@ days that exist). Totals and every single-dimension slice. The path is
 `worlds[].weekly_series`.
 
 A cumulative metric (`wau`, `rolling_window`) is a trailing window already;
-over a week take the last day. MetricFlow 0.13 instead returns its value on
-the week's *first* day; both are in the daily series.
+over a week take the last day, which is also what MetricFlow returns (the
+metric declares `period_agg: last`).
 
 `time_aggregation` is how a metric's days *should* combine, and it is not
 always what `mf query --group-by metric_time__week` returns. Each metric says
 both: `metrics[].metricflow_week` is MetricFlow's rule (`sum_of_days`,
-`average_of_rows`, `distinct_over_week`, `first_day`, `ratio_of_week_inputs`,
-`derived_of_week_inputs`, `min_over_week`, `max_over_week`) and
-`matches_metricflow_week` says whether the two agree. They do not for stocks
-(MetricFlow adds up seven days of MRR), distinct counts, cumulative metrics,
-and ratios or formulas built on any of those.
+`average_of_rows`, `distinct_over_week`, `last_day`, `first_day`,
+`ratio_of_week_inputs`, `derived_of_week_inputs`, `min_over_week`,
+`max_over_week`) and `matches_metricflow_week` says whether the two agree.
+They agree for every stock: the snapshot measures (`mrr`, `open_deals`,
+`open_pipeline_value`) declare `non_additive_dimension` and the cumulative
+ones (`customer_base`, `trade_inventory_build`, `wau`) declare `period_agg:
+last`, so MetricFlow answers a week or a month with its last day
+(`last_day`). They do not for distinct counts and the ratios built on them
+(`arpu`, `customer_churn_rate`).
 For a ratio or derived metric, `input_metricflow_week` gives each input's
 MetricFlow rule: `customer_churn_rate`'s denominator is `distinct_over_week`,
 so MetricFlow's weekly rate divides by the week's distinct active

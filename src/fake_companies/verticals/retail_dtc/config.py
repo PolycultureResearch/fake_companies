@@ -20,6 +20,11 @@ class CategoryConfig(_Base):
     price_max: float
     unit_cost_ratio: float = 0.45  # unit_cost = price * ratio
     popularity: float = 1.0  # relative weight in basket category sampling
+    # How a list-price change (the ``price.<category>`` driver) shifts the
+    # category's share of basket lines: weight x price ** -elasticity. Lines
+    # per order do not read price, so a price rise moves units to the other
+    # categories (substitution) rather than losing them.
+    price_elasticity: float = 1.5
     colors: list[str] = Field(default_factory=lambda: list(_DEFAULT_COLORS))
     sizes: list[str] = Field(default_factory=lambda: list(_DEFAULT_SIZES))
 
