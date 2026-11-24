@@ -995,17 +995,13 @@ for each distinct-count metric, `mf query --group-by metric_time__week`, the
 total and every single-dimension slice, equal to the file on every week.
 
 **Not in the file, and why.** `wau` is a cumulative metric (a trailing
-7-day distinct count, computed daily). MetricFlow 0.13 answers it at week
-grain with its value on the *first* day of the week (`FIRST_VALUE` over the
-week: the seven days ending that Monday, mostly the previous week). That is
-already in the daily series, so it needs no file. Note the mismatch with the
-manifest, which says `rolling_window`: take the *last* day. The last day is
-the trailing week that the period actually covers, which is what a week-grain
-WAU should mean, so the manifest is unchanged. But it is not MetricFlow's
-number: a consumer matching MetricFlow exactly takes the first day. The same
-holds for the cumulative stocks added in §10.3. The manifest now states this
-per metric (`metricflow_week`, `matches_metricflow_week`, §10.9). Monthly
-grain is not built.
+7-day distinct count, computed daily), so its week value is a day of the
+daily series and needs no file. MetricFlow 0.13 answered it with the week's
+*first* day (`FIRST_VALUE`, its default `period_agg`: the seven days ending
+that Monday, mostly the previous week) while the manifest's rule took the
+last; since §10.10 the metric declares `period_agg: last` and the two agree.
+The same holds for the cumulative stocks added in §10.3. Monthly grain is
+not built.
 
 ### 10.3 Metrics the trees needed: discounted orders, and a stock in retail and wholesale
 
@@ -1307,10 +1303,11 @@ stated rule, on every full week):
 
 | `metricflow_week` | Metrics | Agrees with `time_aggregation`? |
 |---|---|---|
-| `sum_of_days` | every `sum`/`count` measure, **including the stocks** MRR, open deals and open pipeline: MetricFlow does not know a level is a level and adds seven days of it | yes for flows, no for stocks |
+| `sum_of_days` | every additive `sum`/`count` measure | yes |
+| `last_day` | since §10.10: the snapshot stocks `mrr`, `open_deals`, `open_pipeline_value` (semi-additive measures) and the cumulative `wau`, `customer_base`, `trade_inventory_build` (`period_agg: last`) | yes |
 | `average_of_rows` | averages | yes |
 | `distinct_over_week` | `dau`, `paying_active_users`, `active_subscriptions` | no (the number is in the weekly series file) |
-| `first_day` | cumulative metrics: `wau`, `customer_base`, `trade_inventory_build` | no (the rule takes the last day) |
+| `first_day` | a cumulative metric with MetricFlow's default `period_agg` (none since §10.10) | no (the rule takes the last day) |
 | `ratio_of_week_inputs`, `derived_of_week_inputs` | ratios and derived metrics, from their inputs' week values | when every input agrees (not for `customer_churn_rate`, `arpu`) |
 
 **Design.** Two fields on every `metrics[]` entry, so the mismatch is named
@@ -1321,10 +1318,9 @@ rather than left in prose:
   daily series gives MetricFlow's week number;
 - `input_metricflow_week` (ratios and derived metrics): each input's own
   `metricflow_week` (below). The first two fields are on every metric. False for 11 metrics across
-  the four verticals: `mrr`, `active_subscriptions`, `dau`,
-  `paying_active_users`, `wau`, `arpu`, `customer_churn_rate`,
-  `open_deals`, `open_pipeline_value`, `customer_base`,
-  `trade_inventory_build`.
+  the four verticals when this was written; since §10.10 for 5, all
+  distinct counts or built on one: `active_subscriptions`, `dau`,
+  `paying_active_users`, `arpu`, `customer_churn_rate`.
 
 `time_aggregation` is **not** changed to match MetricFlow. Where they differ,
 MetricFlow's number is the wrong business number (seven days of MRR added
@@ -1354,6 +1350,61 @@ meaning, so a version 2 reader that ignores them reads every value as
 before. (A reader that validates the manifest strictly, as
 `load_world_set` does with an older fake_companies, rejects the unknown
 fields; upgrade the library to read new sets.)
+
+### 10.10 Stocks MetricFlow answers by their last day (2026-11-24)
+
+**The problem.** Breakdown's C66 (its PR #152) found that MetricFlow summed
+the daily snapshots of a stock at a coarser grain: White Cube `mrr` at week
+grain came back as 186,383 against a last-day level of 26,946, and Meridian's
+weekly `open_deals` and `open_pipeline_value` read 7.2 to 8.1 times their
+week-end level. Every MetricFlow consumer got that number. Breakdown now
+refuses such a stock at load unless the measure is declared semi-additive.
+
+**Audit of every measure** over a table with one row per entity per day,
+and of every running total:
+
+| Vertical | Measure (metric) | Table | Over time | Why |
+|---|---|---|---|---|
+| b2c_saas | `mrr` | `fct_subscription_days` | snapshot | MRR on the day; a week holds one level, not seven |
+| b2c_saas | `subscription_day_count` (`member_activity_rate` denominator) | `fct_subscription_days` | additive | member-days: the rate is active member-days over member-days, both sums |
+| b2c_saas | `active_subscriptions` | `fct_subscription_days` | `count_distinct`, unchanged | a week's value is "distinct during the week" (weekly series file); C66 accepts it |
+| b2c_saas | `active_users`, `paying_active_users` | `fct_activity_days` | `count_distinct`, unchanged | as above |
+| b2c_saas | `paying_user_days` | `fct_activity_days` | additive | paying user-days, the activity-rate numerator |
+| b2b_services | `open_deals`, `open_pipeline_value` | `fct_deal_days` | snapshot | deals open on the day |
+| retail_dtc | `customer_base` (cumulative over `new_customers`) | `dim_customers` | measure additive; metric a level | `period_agg: last` |
+| cpg_wholesale | `trade_inventory_build` (cumulative over `net_inventory_units`) | `fct_inventory_flows` | measure additive (flows in and out); metric a level | `period_agg: last` |
+| b2c_saas | `wau` (cumulative, 7-day window) | `fct_activity_days` | trailing window | `period_agg: last`: the week's WAU is the week itself |
+
+Every other measure is over an event table (one row per session, order,
+event, invoice, shipment, scan) and is additive.
+
+**Design.** The three snapshot measures declare
+`non_additive_dimension: {name: date_day, window_choice: max}`: the period
+takes the rows of its last day. No `window_groupings`: one snapshot per day
+covers every entity, so the last day of the period is the same for all of
+them (with groupings MetricFlow would take each entity's own last day, which
+would count a deal closed mid-week as still open). The three cumulative
+metrics declare `cumulative_type_params: {period_agg: last}`. `semantic.py`
+reads both (it refused `non_additive_dimension` before), and
+`metricflow_week` says `last_day` for all six.
+
+**What changed in a set.** No raw table, no ground truth, no daily or weekly
+series value: a day is a day either way. In `worlds.json`, `mrr`,
+`open_deals`, `open_pipeline_value`, `wau`, `customer_base` and
+`trade_inventory_build` go from `sum_of_days` or `first_day` to `last_day`
+and `matches_metricflow_week` from false to true; `arpu`'s
+`input_metricflow_week` names `mrr` as `last_day`. `arpu` still does not
+match: MetricFlow divides the last day's MRR by the week's distinct
+subscriptions (about 0.7% more than the last day's count), where it used to
+divide seven days of MRR by them, seven times too high. Not a schema bump: no
+field changed meaning, and a set built before this says what MetricFlow
+answered then.
+
+**Verified.** `tests/test_semantic_matches_metricflow.py` reproduces `mf
+query` at week grain for every metric from the daily series by
+`metricflow_week` and checks `matches_metricflow_week` against the numbers;
+for the snapshot measures it also checks week and month, in total and by
+every dimension, against the period's last day.
 
 ---
 

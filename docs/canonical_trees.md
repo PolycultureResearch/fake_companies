@@ -30,6 +30,9 @@ now plant, and what is still missing.
 - `breakdown check` passes on all four (run from the breakdown repo with the
   `dbt` extra's `mf` on `PATH`; the trees use the `local` provider, because
   the `dbt` provider refuses cumulative metrics such as `customer_base`).
+  The provider's `project_path` is relative, so run it from `examples/`,
+  with each dbt project parsed (`dbt parse` writes the
+  `target/semantic_manifest.json` the stock check reads).
 
 ## Alpenglow (retail_dtc)
 
@@ -214,11 +217,13 @@ case a price-volume tree exists to catch.
   nothing below a node is scored today. It needs a slice fetcher over the
   series file (every metric is already exported by every dimension the trees
   declare) and a slice score against `root_slice`.
-- **Week values of the B2B stocks.** The loader serves `open_deals` and
-  `open_pipeline_value` as MetricFlow does at week grain, the sum of seven
-  daily levels; the generator's rule is the last day. The trees declare them
-  `kind: stock`, which means the last day; the runner should serve the rule
-  for a stock, or the B2B stock node fits a number seven times its level.
+- **Week values of the stocks** are now MetricFlow's own: the snapshot
+  measures are semi-additive and the cumulative stocks declare
+  `period_agg: last` (spec §10.10), so `open_deals`, `open_pipeline_value`,
+  `trade_inventory_build` and `mrr` come back as their week-end level from
+  `mf query` and from the runner's loader alike. Breakdown's C66 stock
+  refusal passes on all four trees (`trade_inventory_build` is a warning:
+  C66 does not model a cumulative metric's fold, so it cannot verify it).
 - **Two causes at once** need a world holding exactly both (spec §10.8 case
   2); until the generator builds one, score the pair on each single world and
   on `--story`.
