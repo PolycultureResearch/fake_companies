@@ -302,6 +302,9 @@ def test_series_match_metricflow(config_name, tmp_path):
         config_name,
     )
 
+    # --- snapshots at week and month: the period's last day ---------------- #
+    _check_snapshots(layer, dbt_dir, env, mine, lo, hi, tmp_path, config_name)
+
     # --- weekly distinct counts: MetricFlow's metric_time__week ------------ #
     if not weekly_names:
         return
@@ -335,6 +338,53 @@ def test_series_match_metricflow(config_name, tmp_path):
             )
 
 
+def _check_snapshots(layer, dbt_dir, env, mine, lo, hi, tmp_path, config_name):
+    """A semi-additive (snapshot) measure: MetricFlow's week and month value,
+    in total and by every dimension, is the daily series on the period's last
+    day (``metricflow_week`` = ``last_day``). Whole periods only."""
+    names = [
+        n
+        for n, m in layer.metrics.items()
+        if m.kind == "simple" and m.measure.non_additive == "max"
+    ]
+    for name in names:
+        days = mine[mine["metric"] == name]
+        for grain in ("week", "month"):
+            if grain == "week":
+                starts = pd.date_range(
+                    lo + pd.Timedelta(days=(7 - lo.dayofweek) % 7), hi, freq="7D"
+                )
+                ends = starts + pd.Timedelta(days=6)
+            else:
+                starts = pd.date_range(
+                    lo if lo.day == 1 else lo + pd.offsets.MonthBegin(), hi, freq="MS"
+                )
+                ends = starts + pd.offsets.MonthEnd(0)
+            keep = ends <= hi
+            starts, ends = starts[keep], ends[keep]
+            assert len(starts) >= 2, (name, grain)
+            sets = [(None, None)] + [(d, i) for d, i in layer.dimensions(name).items() if i]
+            for dim, mf_id in sets:
+                ids = [mf_id] if mf_id else []
+                out = tmp_path / f"snap_{name}_{grain}_{dim}.csv"
+                theirs = _mf(dbt_dir, env, [name], ids, out, grain=grain)
+                theirs = theirs[theirs["date"].isin(starts)]
+                theirs["value"] = theirs[mf_id].map(_spell) if mf_id else None
+                mine_d = days[days["dimension"].isna() if dim is None else days["dimension"] == dim]
+                last = mine_d[mine_d["date"].isin(ends)].copy()
+                last["date"] = last["date"].map(dict(zip(ends, starts)))
+                on = ["date", "value"] if mf_id else ["date"]
+                joined = theirs[[*on, name]].merge(last[[*on, "v"]], on=on, how="outer")
+                a = joined["v"].to_numpy(dtype=float)
+                b = joined[name].to_numpy(dtype=float)
+                ok = np.isclose(a, b, rtol=1e-9, atol=1e-9, equal_nan=True)
+                ok |= np.isnan(b) & ((a == 0.0) | np.isnan(a))
+                assert ok.all(), (
+                    f"{config_name}: {grain} {name} by {dim or 'total'} is not the "
+                    f"period's last day on {int((~ok).sum())} rows"
+                )
+
+
 def _check_week_rules(layer, vertical, mine, weekly, mf_week, lo, hi, config_name):
     """``metricflow_week`` reproduces mf query at week grain for every metric,
     and ``matches_metricflow_week`` is true exactly when ``time_aggregation``
@@ -360,6 +410,8 @@ def _check_week_rules(layer, vertical, mine, weekly, mf_week, lo, hi, config_nam
             return g["numerator"].sum() / g["denominator"].sum()
         if rule == "first_day":
             return g["v"].first()
+        if rule == "last_day":
+            return g["v"].last()
         if rule == "distinct_over_week":
             return distinct.loc[name].reindex(weeks)
         if rule == "ratio_of_week_inputs":

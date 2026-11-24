@@ -134,13 +134,13 @@ class MetricInfo(BaseModel):
     # How MetricFlow 0.13 answers this metric at metric_time__week
     # (SemanticLayer.metricflow_week): sum_of_days | average_of_rows |
     # distinct_over_week | min_over_week | max_over_week | first_day |
-    # ratio_of_week_inputs | derived_of_week_inputs.
+    # last_day | ratio_of_week_inputs | derived_of_week_inputs.
     metricflow_week: str | None = None
     # Whether ``time_aggregation`` applied to the daily series gives that same
-    # number. False for every stock (MetricFlow adds seven days of a level),
-    # every cumulative metric (MetricFlow takes the first day, the rule the
-    # last), every distinct count (MetricFlow's is in the weekly file) and
-    # anything computed from one of those. Where it is false the two answers
+    # number. True for the stocks: each snapshot measure is semi-additive and
+    # each cumulative metric declares period_agg: last, so MetricFlow takes
+    # the last day too. False for every distinct count (MetricFlow's is in
+    # the weekly file) and anything computed from one. Where it is false the two answers
     # differ by design: use time_aggregation for the business number and
     # metricflow_week to reproduce mf query; never assume they agree.
     matches_metricflow_week: bool | None = None

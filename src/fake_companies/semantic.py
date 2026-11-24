@@ -199,6 +199,10 @@ class Measure:
     time_expr: str
     entity: str | None  # primary entity (MetricFlow dimension prefix)
     dimensions: dict[str, str]  # categorical dimension name -> sql expr
+    # A snapshot measure: semi-additive over its own day dimension, so a
+    # coarser period takes the last day's rows (``window_choice: max``)
+    # instead of adding the days up. None for an additive measure.
+    non_additive: str | None = None
 
 
 @dataclass(frozen=True)
@@ -210,6 +214,25 @@ class Metric:
     inputs: dict[str, str] = field(default_factory=dict)  # alias -> metric name
     expr: str | None = None  # derived: sql over the aliases
     window_days: int | None = None  # cumulative; None with kind cumulative: all time
+    # cumulative: which day stands for a coarser period (MetricFlow's
+    # ``period_agg``; its default is the first day, a level wants the last).
+    period_agg: str = "first"
+
+
+def _non_additive(spec: dict, time_name: str) -> tuple[str | None, str | None]:
+    """A snapshot measure's ``non_additive_dimension``: (window choice, None),
+    or (None, why it is not evaluated). Only the form a daily snapshot needs
+    is supported: over the measure's own day dimension, ``window_choice:
+    max`` (the period's last day), with no ``window_groupings`` (which would
+    pick a last day per entity)."""
+    if spec.get("name") != time_name:
+        return None, f"non_additive_dimension {spec.get('name')!r} is not the agg time dimension"
+    if spec.get("window_groupings"):
+        return None, "non_additive_dimension with window_groupings"
+    choice = spec.get("window_choice", "min")
+    if choice != "max":
+        return None, f"non_additive_dimension window_choice {choice!r}"
+    return choice, None
 
 
 class SemanticLayer:
@@ -260,12 +283,13 @@ class SemanticLayer:
             time_name = meas.get("agg_time_dimension") or default_time
             if meas["agg"] not in _AGGS:
                 reason = f"measure agg {meas['agg']!r}"
-            elif meas.get("non_additive_dimension"):
-                reason = "non_additive_dimension"
             elif time_name not in time_dims:
                 reason = f"agg_time_dimension {time_name!r} is not a time dimension of the model"
             elif (time_dims[time_name].get("type_params") or {}).get("time_granularity") != "day":
                 reason = "time dimension is not day-grain"
+            non_additive = None
+            if not reason and meas.get("non_additive_dimension"):
+                non_additive, reason = _non_additive(meas["non_additive_dimension"], time_name)
             if reason:
                 self._bad_measures[name] = reason
                 continue
@@ -278,6 +302,7 @@ class SemanticLayer:
                 time_expr=str(time_dims[time_name].get("expr") or time_name),
                 entity=primary,
                 dimensions=cat_dims,
+                non_additive=non_additive,
             )
 
     def _resolve(self, name: str) -> Metric | None:
@@ -343,19 +368,32 @@ class SemanticLayer:
             return Metric(name, kind, inputs=inputs, expr=str(tp["expr"]))
         if kind == "cumulative":
             ctp = tp.get("cumulative_type_params") or {}
-            if set(tp) - {"measure", "cumulative_type_params"} or set(ctp) - {"window"}:
-                raise UnsupportedSemantics("cumulative options beyond a window")
+            if set(tp) - {"measure", "cumulative_type_params"} or set(ctp) - {
+                "window",
+                "period_agg",
+            }:
+                raise UnsupportedSemantics("cumulative options beyond a window and period_agg")
+            period_agg = str(ctp.get("period_agg", "first")).lower()
+            if period_agg not in ("first", "last"):
+                raise UnsupportedSemantics(f"cumulative period_agg {period_agg!r}")
             measure, fill = self._measure(tp["measure"])
             if "window" not in ctp:  # a running total since the data starts
                 if measure.agg not in ("sum", "count", "sum_boolean"):
                     raise UnsupportedSemantics(
                         f"a cumulative metric with no window over a {measure.agg!r} measure"
                     )
-                return Metric(name, kind, measure=measure, fill=fill)
+                return Metric(name, kind, measure=measure, fill=fill, period_agg=period_agg)
             m = re.fullmatch(r"(\d+) days?", str(ctp["window"]).strip())
             if m is None:
                 raise UnsupportedSemantics(f"cumulative window {ctp.get('window')!r} is not N days")
-            return Metric(name, kind, measure=measure, fill=fill, window_days=int(m.group(1)))
+            return Metric(
+                name,
+                kind,
+                measure=measure,
+                fill=fill,
+                window_days=int(m.group(1)),
+                period_agg=period_agg,
+            )
         raise UnsupportedSemantics(f"metric type {kind!r}")
 
     # -- catalog ----------------------------------------------------------- #
@@ -473,9 +511,14 @@ class SemanticLayer:
         - ``distinct_over_week``: a ``count_distinct`` measure over the
           week's rows (the weekly series file);
         - ``min_over_week`` / ``max_over_week``;
+        - ``last_day``: a cumulative metric declaring ``period_agg: last``,
+          or a snapshot measure declared semi-additive
+          (``non_additive_dimension`` on its day, ``window_choice: max``):
+          the rows of the week's last day with rows, which is the period-end
+          level a stock means;
         - ``first_day``: a cumulative metric takes its value on the week's
-          first day (``FIRST_VALUE``), for a trailing window the seven days
-          ending that Monday;
+          first day (``FIRST_VALUE``, MetricFlow's default ``period_agg``),
+          for a trailing window the seven days ending that Monday;
         - ``ratio_of_week_inputs`` / ``derived_of_week_inputs``: computed
           from its inputs' own week values.
         """
@@ -485,7 +528,9 @@ class SemanticLayer:
         if metric.kind == "derived":
             return "derived_of_week_inputs"
         if metric.kind == "cumulative":
-            return "first_day"
+            return "last_day" if metric.period_agg == "last" else "first_day"
+        if metric.measure.non_additive == "max":  # type: ignore[union-attr]
+            return "last_day"
         return {
             "sum": "sum_of_days",
             "count": "sum_of_days",
@@ -503,7 +548,12 @@ class SemanticLayer:
         if metric.kind in ("ratio", "derived"):
             return all(self.matches_metricflow_week(m, stocks) for m in metric.inputs.values())
         ours, theirs = self.time_aggregation(name, stocks), self.metricflow_week(name)
-        return (ours, theirs) in {("sum", "sum_of_days"), ("average", "average_of_rows")}
+        return (ours, theirs) in {
+            ("sum", "sum_of_days"),
+            ("average", "average_of_rows"),
+            ("end_of_period", "last_day"),
+            ("rolling_window", "last_day"),
+        }
 
     def fill_value(self, name: str) -> float | None:
         """What a day with no rows is worth: the metric's ``fill_nulls_with``.

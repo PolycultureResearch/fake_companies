@@ -60,6 +60,9 @@ metrics:
       measure:
         name: new_customers
         fill_nulls_with: 0
+      cumulative_type_params:
+        # A level: a week or month is its last day, not its first.
+        period_agg: last
 
   - name: returning_customer_orders
     description: Orders from existing customers (repeat purchases).

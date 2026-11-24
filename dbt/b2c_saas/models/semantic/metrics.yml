@@ -307,6 +307,9 @@ metrics:
         name: active_users
         fill_nulls_with: 0
       cumulative_type_params:
+        # A week's WAU is the trailing seven days ending its last day (the
+        # week itself), not those ending its first.
+        period_agg: last
         window: 7 days
 
   - name: product_events
